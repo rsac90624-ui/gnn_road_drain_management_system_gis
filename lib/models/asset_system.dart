@@ -1,0 +1,4 @@
+enum AssetSystem {
+  road,
+  drainage,
+}
