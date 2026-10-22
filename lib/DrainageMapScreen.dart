@@ -310,6 +310,12 @@ class _DrainageMapScreenState extends State<DrainageMapScreen> {
 
       _drainsLoaded = true;
 
+      Future.microtask(() {
+        if (mounted) {
+          loadNewCreatedDrains();
+        }
+      });
+
       if (_mapReady &&
           _mapController != null &&
           !_hasAutoZoomed &&
@@ -1569,6 +1575,168 @@ class _DrainageMapScreenState extends State<DrainageMapScreen> {
 
   bool _isLoadingNewDrains = false;
 
+  List<LatLng> parseWKTToLatLngList(String wkt) {
+    final List<LatLng> points = [];
+    try {
+      final uppercaseWkt = wkt.toUpperCase().trim();
+      if (uppercaseWkt.contains("LINESTRING")) {
+        final start = wkt.indexOf('(');
+        final end = wkt.lastIndexOf(')');
+        if (start != -1 && end != -1 && end > start) {
+          String content = wkt.substring(start + 1, end).trim();
+          content = content.replaceAll('(', '').replaceAll(')', '');
+          final pointPairs = content.split(',');
+          for (var pair in pointPairs) {
+            final coords = pair.trim().split(RegExp(r'\s+'));
+            if (coords.length >= 2) {
+              final double? val1 = double.tryParse(coords[0]);
+              final double? val2 = double.tryParse(coords[1]);
+              if (val1 != null && val2 != null) {
+                // In India, Longitude is ~70-90, Latitude is ~8-37
+                if (val1 > val2) {
+                  points.add(LatLng(val2, val1));
+                } else {
+                  points.add(LatLng(val1, val2));
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Error parsing WKT: $e");
+    }
+    return points;
+  }
+
+  List<LatLng> parseGeoJsonToLatLngList(dynamic geoSource) {
+    if (geoSource == null) return [];
+
+    final List<LatLng> points = [];
+    try {
+      // 1. If String, check if WKT or JSON
+      if (geoSource is String) {
+        final trimmed = geoSource.trim();
+        final upper = trimmed.toUpperCase();
+        if (upper.contains('LINESTRING')) {
+          final wktPts = parseWKTToLatLngList(trimmed);
+          if (wktPts.isNotEmpty) return wktPts;
+        }
+
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            final decoded = jsonDecode(trimmed);
+            final decodedPts = parseGeoJsonToLatLngList(decoded);
+            if (decodedPts.isNotEmpty) return decodedPts;
+          } catch (e) {
+            debugPrint("Failed jsonDecode: $e");
+          }
+        }
+      }
+
+      // 2. If List
+      if (geoSource is List) {
+        for (var item in geoSource) {
+          if (item is List && item.length >= 2) {
+            final double? v1 = double.tryParse(item[0].toString());
+            final double? v2 = double.tryParse(item[1].toString());
+            if (v1 != null && v2 != null) {
+              if (v1 > v2) {
+                points.add(LatLng(v2, v1));
+              } else {
+                points.add(LatLng(v1, v2));
+              }
+            }
+          } else if (item is Map) {
+            final double? lat = double.tryParse((item['lat'] ?? item['latitude'])?.toString() ?? '');
+            final double? lng = double.tryParse((item['lng'] ?? item['longitude'])?.toString() ?? '');
+            if (lat != null && lng != null) {
+              points.add(LatLng(lat, lng));
+            }
+          }
+        }
+        if (points.isNotEmpty) return points;
+      }
+
+      // 3. If Map / JSON Object
+      if (geoSource is Map) {
+        final map = Map<String, dynamic>.from(geoSource);
+
+        if (map['type']?.toString().toLowerCase() == 'feature' && map.containsKey('geometry')) {
+          final featurePts = parseGeoJsonToLatLngList(map['geometry']);
+          if (featurePts.isNotEmpty) return featurePts;
+        }
+
+        if (map.containsKey('geometry') && map['geometry'] != null) {
+          final innerPts = parseGeoJsonToLatLngList(map['geometry']);
+          if (innerPts.isNotEmpty) return innerPts;
+        }
+
+        final String type = map['type']?.toString().toLowerCase() ?? '';
+        final coordsRaw = map['coordinates'] ?? map['coords'];
+
+        if ((type == 'linestring' || type == 'line') && coordsRaw is List) {
+          for (var c in coordsRaw) {
+            if (c is List && c.length >= 2) {
+              final double? v1 = double.tryParse(c[0].toString());
+              final double? v2 = double.tryParse(c[1].toString());
+              if (v1 != null && v2 != null) {
+                if (v1 > v2) {
+                  points.add(LatLng(v2, v1));
+                } else {
+                  points.add(LatLng(v1, v2));
+                }
+              }
+            }
+          }
+          if (points.isNotEmpty) return points;
+        } else if (type == 'multilinestring' && coordsRaw is List) {
+          for (var line in coordsRaw) {
+            if (line is List) {
+              for (var c in line) {
+                if (c is List && c.length >= 2) {
+                  final double? v1 = double.tryParse(c[0].toString());
+                  final double? v2 = double.tryParse(c[1].toString());
+                  if (v1 != null && v2 != null) {
+                    if (v1 > v2) {
+                      points.add(LatLng(v2, v1));
+                    } else {
+                      points.add(LatLng(v1, v2));
+                    }
+                  }
+                }
+              }
+            }
+          }
+          if (points.isNotEmpty) return points;
+        }
+      }
+    } catch (e) {
+      debugPrint("Error in parseGeoJsonToLatLngList: $e");
+    }
+
+    // 4. Fallback Regex
+    try {
+      final str = geoSource.toString();
+      final matches = RegExp(r'(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)').allMatches(str);
+      for (final match in matches) {
+        final double? num1 = double.tryParse(match.group(1) ?? '');
+        final double? num2 = double.tryParse(match.group(2) ?? '');
+        if (num1 != null && num2 != null) {
+          if (num1 > num2) {
+            points.add(LatLng(num2, num1));
+          } else {
+            points.add(LatLng(num1, num2));
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Regex fallback error: $e");
+    }
+
+    return points;
+  }
+
   Future<void> loadNewCreatedDrains() async {
     if (!_mapReady || _isLoadingNewDrains) return;
     _isLoadingNewDrains = true;
@@ -1606,30 +1774,44 @@ class _DrainageMapScreenState extends State<DrainageMapScreen> {
         decimationStep = 5;  // High decimation, low zoom
       }
 
-      for (final row in rows) {
-        if (polylineCount >= 100) break;
+      // Process newest drains first (highest gid first)
+      final List<dynamic> sortedRows = List.from(rows);
+      sortedRows.sort((a, b) {
+        final int gidA = int.tryParse((a is Map ? a['gid'] : null)?.toString() ?? '0') ?? 0;
+        final int gidB = int.tryParse((b is Map ? b['gid'] : null)?.toString() ?? '0') ?? 0;
+        return gidB.compareTo(gidA);
+      });
 
-        final String gid = "new_${row['gid']}";
-        final String? geojson = row['geojson'] ?? row['geom'] ?? row['geometry'];
+      for (final row in sortedRows) {
+        if (polylineCount >= 250) break;
 
-        if (geojson == null) {
-          debugPrint("⚠️ Skipping drain $gid: No geometry data");
-          continue;
+        final String gid = "new_${row['gid'] ?? row['id'] ?? polylineCount}";
+        final dynamic geoSource = row['geojson'] ??
+            row['geom'] ??
+            row['geometry'] ??
+            row['wkt_geom'] ??
+            row['geomwkt'] ??
+            row['wkt'] ??
+            row['st_asgeojson'] ??
+            row['st_astext'] ??
+            row;
+
+        if (geoSource == null) continue;
+
+        final rawPoints = parseGeoJsonToLatLngList(geoSource);
+        if (rawPoints.isEmpty) continue;
+
+        // Yield UI thread periodically to prevent main thread blocking & heating
+        if (polylineCount % 30 == 0) {
+          await Future.delayed(Duration.zero);
+          if (!mounted) return;
         }
-
-        // 🔹 parse geometry off UI isolate
-        final List<List<double>> coords =
-        await compute<String, List<List<double>>>(parseLineCoords, geojson);
-
-        final rawPoints = coords.map((c) => LatLng(c[1], c[0])).toList();
-
-        // Decimate points based on the zoom level
-        final points = decimatePoints(rawPoints, decimationStep);
 
         // 🔹 Build the polyline
         final Set<Polyline> built = _buildDottedPolyline(
           gid,
-          List<LatLng>.from(points), // Clone the points for safety
+          List<LatLng>.from(rawPoints),
+          color: Colors.blue,
         );
 
         _dottedCache[gid] = built;
@@ -1655,76 +1837,11 @@ class _DrainageMapScreenState extends State<DrainageMapScreen> {
     }
   }
 
-
-  // Future<void> loadNewCreatedDrains() async {
-  //   if (_isCameraMoving || !_mapReady || _isLoadingNewDrains) return;
-  //   _isLoadingNewDrains = true;
-  //
-  //   try {
-  //     final result = await drainageService.fetchNewCreatedDrains(
-  //       widget.zoneName ?? "",
-  //       widget.wardNo,
-  //     );
-  //
-  //     final List<dynamic> rows = result['data'];
-  //
-  //     // 🔥 HARD RESET: Clear previous cache
-  //     _dottedCache.clear();
-  //
-  //     final Set<Polyline> freshDottedPolylines = {};
-  //     int polylineCount = 0;
-  //
-  //     for (final row in rows) {
-  //       if (polylineCount >= 100) break;  // Limit the number of polylines to load (for performance)
-  //
-  //       final String gid = "new_${row['gid']}";
-  //
-  //       // 🔹 parse geometry off UI isolate
-  //       final List<List<double>> coords =
-  //       await compute<String, List<List<double>>>(parseLineCoords, row['geojson'] as String);
-  //
-  //       final rawPoints = coords.map((c) => LatLng(c[1], c[0])).toList();
-  //
-  //       final points = decimatePoints(rawPoints, 2);  // Simplify the polyline to reduce memory load
-  //
-  //       // 🔹 Build the polyline
-  //       final Set<Polyline> built = _buildDottedPolyline(
-  //         gid,
-  //         List<LatLng>.from(points), // Clone the points for safety
-  //       );
-  //
-  //       _dottedCache[gid] = built;
-  //       freshDottedPolylines.addAll(built);
-  //       polylineCount++;
-  //     }
-  //
-  //     // Check if the widget is still mounted before updating the UI
-  //     if (!mounted) return;
-  //
-  //     // Only update state if there are new polyline changes
-  //     if (freshDottedPolylines.isNotEmpty) {
-  //       // Update map with new polylines
-  //       setState(() {
-  //         _newDrainDottedPolylines
-  //           ..clear()
-  //           ..addAll(freshDottedPolylines);
-  //       });
-  //     }
-  //   } catch (e) {
-  //     debugPrint("Failed to load new drains: $e");
-  //   } finally {
-  //     _isLoadingNewDrains = false;
-  //   }
-  // }
-
-
-
-
   Set<Polyline> _buildDottedPolyline(
       String baseId,
       List<LatLng> points, {
-        Color color = Colors.lightGreenAccent,
-        int width = 4,
+        Color color = Colors.blue,
+        int width = 5,
       }) {
     if (points.isEmpty) {
       debugPrint("Invalid Polyline Points: $baseId");

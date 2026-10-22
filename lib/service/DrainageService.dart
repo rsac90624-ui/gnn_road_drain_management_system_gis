@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -45,7 +46,8 @@ class DrainageService {
       throw Exception("Failed to load drainage data");
     }
 
-    final decoded = json.decode(response.body);
+    // Run JSON decode in background isolate to prevent ANR
+    final decoded = await compute(jsonDecode, response.body);
     
     // Handle both List response and Map response with 'data' key
     final List drains = (decoded is List) ? decoded : (decoded['data'] ?? []);
@@ -221,9 +223,10 @@ class DrainageService {
 
     final uri = Uri.parse(
       "${AppConstants.baseURL}api/gha_drainage/drain/new-created-list"
-      "?zoneNo=$zoneNo"
-      "&wardNo=$wardNo"
-      "&nagarNigam=$nagarNigam",
+      "?zoneNo=${Uri.encodeComponent(zoneNo.trim())}"
+      "&zoneName=${Uri.encodeComponent(zoneNo.trim())}"
+      "&wardNo=${Uri.encodeComponent(wardNo.trim())}"
+      "&nagarNigam=${Uri.encodeComponent(nagarNigam.trim())}",
     );
 
     debugPrint("📡 FETCH NEW DRAINS URL: $uri");

@@ -166,7 +166,19 @@ class _NewRoadDrainFormScreenState extends State<NewRoadDrainFormScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _readonly("Zone No", widget.zoneNo),
+            _readonly("Zone No", () {
+              String zNo = widget.zoneNo.trim();
+              if (zNo.isNotEmpty) {
+                final match = RegExp(r'\d+').firstMatch(zNo);
+                if (match != null) return match.group(0)!;
+              }
+              if (widget.zoneName.isNotEmpty) {
+                final match = RegExp(r'\d+').firstMatch(widget.zoneName);
+                if (match != null) return match.group(0)!;
+                return widget.zoneName.trim();
+              }
+              return zNo;
+            }()),
             _readonly("Zone Name", widget.zoneName),
             _readonly("Ward No", widget.wardNo),
             _readonly("Ward Name", widget.wardName),
@@ -268,15 +280,35 @@ class _NewRoadDrainFormScreenState extends State<NewRoadDrainFormScreen> {
 
   Widget _readonly(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         readOnly: true,
         initialValue: value,
+        style: const TextStyle(
+          fontSize: 14,
+          color: Colors.black87,
+        ),
         decoration: InputDecoration(
-          labelText: label,
+          labelText: label.toUpperCase(),
+          floatingLabelBehavior: FloatingLabelBehavior.always,
           filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          fillColor: const Color(0xFFF0F0F0),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 16,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4),
+            borderSide: const BorderSide(color: Colors.grey),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4),
+            borderSide: const BorderSide(color: Colors.grey),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4),
+            borderSide: const BorderSide(color: Colors.grey, width: 1.2),
+          ),
         ),
       ),
     );

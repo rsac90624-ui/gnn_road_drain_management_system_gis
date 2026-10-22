@@ -19,6 +19,8 @@ import 'service/PointAssetService.dart';
 import 'service/WardPolygonService.dart';
 import 'service/dynamic_legend.dart';
 import 'utils/ConfirmedRoadDatabase.dart';
+import 'utils/app_error_utils.dart';
+import 'utils/app_snackbar.dart';
 import 'Screens/missing_road/MissingRoadFormScreen.dart';
 import 'Screens/road_screen/NewRoadFormScreen.dart';
 import 'Screens/road_screen/RoadUpdateScreen.dart';
@@ -85,6 +87,7 @@ class WelcomescreenState extends State<Welcomescreen> {
   // 🆕 ROAD Update FEATURE End
 
   final Completer<GoogleMapController> _controller = Completer();
+  bool _hasAutoZoomedMap = false; // Tracks if initial map zoom is completed
   Set<Polyline> _polylines = {};
   Set<Marker> _markers = {};
 
@@ -92,6 +95,7 @@ class WelcomescreenState extends State<Welcomescreen> {
   Set<Polygon> _zonePolygons = {};
 
   String? _selectedZone;
+  String? _selectedZoneNo;
   String? _selectedWard;
 
   int _roadCount = 0;
@@ -134,6 +138,12 @@ class WelcomescreenState extends State<Welcomescreen> {
   bool _isFabExpanded = false;
   bool _newRoadConfirmShown = false;
 
+  bool _show12mRoads = false;
+  Set<Polyline> _12mRoadPolylines = {};
+  double _12mRoadOpacity = 1.0;
+  List<Map<String, dynamic>> _12mRoadsData = [];
+  List<List<List<LatLng>>> _12mRoadParsedSegments = [];
+
   //----------------------------------------- Service Classes ------------------------------------------------------------------------------------------------
   final LocationService locationService = LocationService();
   final wardService = WardPolygonService();
@@ -144,6 +154,7 @@ class WelcomescreenState extends State<Welcomescreen> {
   Set<Marker> _manholeMarkers = {};
   Set<Marker> _busStopMarkers = {};
   Set<Polygon> _parkingAreaPolygons = {};
+  Set<Polygon> _greenMedianPolygons = {};
   Set<Marker> _roadSignageMarkers = {};
   Set<Marker> _trafficSafetyMarkers = {};
   Set<Polyline> _trafficSafetyLines = {};
@@ -154,6 +165,67 @@ class WelcomescreenState extends State<Welcomescreen> {
   Set<Marker> _transformerMarkers = {};
   Set<Marker> _streetLightMarkers = {};
   Set<Marker> _telecomBoxMarkers = {};
+
+  Set<Marker> _cachedPointAssetMarkers = {};
+  LatLngBounds? _currentVisibleRegion;
+  final Map<String, ParsedRoadGeometry> _roadGeomCache = {};
+
+  void _updateCachedPointAssetMarkers() {
+    _cachedPointAssetMarkers = {
+      ..._manholeMarkers,
+      ..._busStopMarkers,
+      ..._roadSignageMarkers,
+      ..._trafficSafetyMarkers,
+      ..._pavementDistressMarkers,
+      ..._toiletMarkers,
+      ..._electricPoleMarkers,
+      ..._transformerMarkers,
+      ..._streetLightMarkers,
+      ..._telecomBoxMarkers,
+    };
+  }
+
+  bool _isPolylineInBounds(List<LatLng> points, LatLngBounds? bounds) {
+    if (bounds == null || points.isEmpty) return true;
+
+    // Strict 2% edge buffer so roads outside the user's visible bounding box are not rendered
+    final double latPad = (bounds.northeast.latitude - bounds.southwest.latitude).abs() * 0.02;
+    final double lngPad = (bounds.northeast.longitude - bounds.southwest.longitude).abs() * 0.02;
+
+    final double minLat = bounds.southwest.latitude - latPad;
+    final double maxLat = bounds.northeast.latitude + latPad;
+    final double minLng = bounds.southwest.longitude - lngPad;
+    final double maxLng = bounds.northeast.longitude + lngPad;
+
+    for (final p in points) {
+      if (p.latitude >= minLat && p.latitude <= maxLat && p.longitude >= minLng && p.longitude <= maxLng) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Set<Marker> _getVisiblePointAssetMarkers(LatLngBounds? bounds) {
+    if (bounds == null || _cachedPointAssetMarkers.isEmpty) return _cachedPointAssetMarkers;
+
+    final double latPad = (bounds.northeast.latitude - bounds.southwest.latitude).abs() * 0.02;
+    final double lngPad = (bounds.northeast.longitude - bounds.southwest.longitude).abs() * 0.02;
+
+    final double minLat = bounds.southwest.latitude - latPad;
+    final double maxLat = bounds.northeast.latitude + latPad;
+    final double minLng = bounds.southwest.longitude - lngPad;
+    final double maxLng = bounds.northeast.longitude + lngPad;
+
+    return _cachedPointAssetMarkers.where((marker) {
+      final p = marker.position;
+      return p.latitude >= minLat && p.latitude <= maxLat && p.longitude >= minLng && p.longitude <= maxLng;
+    }).toSet();
+  }
+
+  final Map<String, List<List<LatLng>>> _wktSegmentCache = {};
+  bool _isFetchingRoads = false;
+  String? _lastFetchedRoadsKey;
+  bool _isFetchingPointAssets = false;
 
   //----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -325,11 +397,14 @@ class WelcomescreenState extends State<Welcomescreen> {
         // 🛡️ Safety checks before using GoogleMapController
         if (!_controller.isCompleted) return;
         final controller = await _controller.future;
-        if (controller == null) return;
+
+        // Prevent zooming when refreshing data internally (e.g. after form submit)
+        if (_isUpdatingRoad || _isDrawingRoad || _isSelectingRoad || _hasAutoZoomedMap) return;
 
         await controller.animateCamera(
           CameraUpdate.newLatLngBounds(bounds, 50),
         );
+        _hasAutoZoomedMap = true;
       });
     }
   }
@@ -343,12 +418,21 @@ class WelcomescreenState extends State<Welcomescreen> {
       // allow confirm dialog again after undo
       _newRoadConfirmShown = false;
 
+      if (_isExtending && _extendTapCount > 0) {
+        _extendTapCount--;
+      }
+
+      if (_newRoadPoints.length <= 3) {
+        _isExtending = false;
+        _extendTapCount = 0;
+      }
+
       if (_newRoadPoints.length < 2) {
         _newRoadPreview = null;
       } else {
         _newRoadPreview = Polyline(
-          polylineId: const PolylineId("new_road"),
-          points: _newRoadPoints,
+          polylineId: PolylineId("new_road_${_newRoadPoints.length}_${DateTime.now().millisecondsSinceEpoch}"),
+          points: List<LatLng>.from(_newRoadPoints),
           color: Colors.purpleAccent,
           width: 5,
         );
@@ -356,183 +440,7 @@ class WelcomescreenState extends State<Welcomescreen> {
     });
   }
 
-  //------------------------------------------ confirmation popup dialog -----------------------------------------------------------
 
-  // void _showRoadInfoPopup(
-  //   BuildContext context,
-  //   Map<String, dynamic> roadData, {
-  //   bool isAlreadyConfirmed = false,
-  //   String? confirmedAt,
-  // }) {
-  //   showModalBottomSheet(
-  //     context: context,
-  //     isScrollControlled: true,
-  //     shape: const RoundedRectangleBorder(
-  //       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-  //     ),
-  //     builder: (BuildContext context) {
-  //       return SafeArea(
-  //         child: SingleChildScrollView(
-  //           child: ConstrainedBox(
-  //             constraints: BoxConstraints(
-  //               maxHeight: MediaQuery.of(context).size.height * 0.9,
-  //             ),
-  //             child: Padding(
-  //               padding: EdgeInsets.only(
-  //                 left: 16,
-  //                 right: 16,
-  //                 top: 20,
-  //                 bottom: MediaQuery.of(context).viewInsets.bottom,
-  //               ),
-  //               child: Column(
-  //                 mainAxisSize: MainAxisSize.min,
-  //                 crossAxisAlignment: CrossAxisAlignment.start,
-  //                 children: [
-  //                   Align(
-  //                     alignment: Alignment.topRight,
-  //                     child: IconButton(
-  //                       icon: Icon(Icons.close, color: Colors.orange.shade700),
-  //                       onPressed: () {
-  //                         Navigator.pop(context);
-  //                         _deselectRoadOnMap(roadData);
-  //                       },
-  //                     ),
-  //                   ),
-  //                   Center(
-  //                     child: Text(
-  //                       "📍 Road Information",
-  //                       style: TextStyle(
-  //                         fontSize: 18,
-  //                         fontWeight: FontWeight.bold,
-  //                         color: Colors.orange,
-  //                       ),
-  //                     ),
-  //                   ),
-  //                   const SizedBox(height: 16),
-  //                   Text("🆔 Road ID: ${roadData['road_id'] ?? 'N/A'}"),
-  //                   Text("📛 Name: ${roadData['road_name'] ?? 'N/A'}"),
-  //                   Text("📍 Zone: ${roadData['zone_name'] ?? 'N/A'}"),
-  //                   Text("🏘️ Ward: ${roadData['ward_no'] ?? 'N/A'}"),
-  //                   Text("🛣️ Category: ${roadData['category'] ?? 'N/A'}"),
-  //                   Text("📏 Length (m): ${roadData['length_met'] ?? 'N/A'}"),
-  //                   Text("🏗️ Condition: ${roadData['condition'] ?? 'N/A'}"),
-  //                   Text(
-  //                     "📅 Year of Construction: ${roadData['yoc'] ?? 'N/A'}",
-  //                   ),
-  //                   Text("🏥 Hospital : ${roadData['hospital'] ?? 'N/A'}"),
-  //                   Text("🏦 Bank : ${roadData['bank_atm'] ?? 'N/A'}"),
-  //                   Text("🏫 School : ${roadData['educationa'] ?? 'N/A'}"),
-  //                   const SizedBox(height: 16),
-  //                   Row(
-  //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-  //                     children: [
-  //                       TextButton.icon(
-  //                         onPressed: () {
-  //                           Navigator.pop(context);
-  //                           _deselectRoadOnMap(roadData);
-  //                         },
-  //                         icon: const Icon(Icons.clear, color: Colors.red),
-  //                         label: const Text(
-  //                           "Clear",
-  //                           style: TextStyle(
-  //                             color: Colors.red,
-  //                             fontWeight: FontWeight.w600,
-  //                           ),
-  //                         ),
-  //                       ),
-  //                       if (isAlreadyConfirmed)
-  //                         Column(
-  //                           crossAxisAlignment: CrossAxisAlignment.center,
-  //                           children: [
-  //                             Text(
-  //                               "✅ Already confirmed on:",
-  //                               style: TextStyle(
-  //                                 color: Colors.green.shade700,
-  //                                 fontWeight: FontWeight.bold,
-  //                               ),
-  //                             ),
-  //                             Text(
-  //                               confirmedAt ?? "Unknown time",
-  //                               style: const TextStyle(
-  //                                 fontSize: 12,
-  //                                 color: Colors.black87,
-  //                               ),
-  //                             ),
-  //                             const SizedBox(height: 6),
-  //                             ElevatedButton.icon(
-  //                               onPressed: null,
-  //                               icon: const Icon(
-  //                                 Icons.check_circle_outline,
-  //                                 color: Colors.white,
-  //                               ),
-  //                               label: const Text("Confirmed"),
-  //                               style: ElevatedButton.styleFrom(
-  //                                 backgroundColor: Colors.grey,
-  //                                 disabledBackgroundColor: Colors.grey,
-  //                               ),
-  //                             ),
-  //                           ],
-  //                         )
-  //                       else
-  //                         ElevatedButton(
-  //                           onPressed: () {
-  //                             showDialog(
-  //                               context: context,
-  //                               builder: (BuildContext dialogContext) {
-  //                                 return AlertDialog(
-  //                                   title: const Text("Confirm Selection"),
-  //                                   content: const Text(
-  //                                     "Are you sure you want to confirm this road selection?",
-  //                                   ),
-  //                                   actions: [
-  //                                     TextButton(
-  //                                       child: const Text("No"),
-  //                                       onPressed: () {
-  //                                         Navigator.pop(dialogContext);
-  //                                         Navigator.pop(context);
-  //                                         _deselectRoadOnMap(roadData);
-  //                                       },
-  //                                     ),
-  //                                     TextButton(
-  //                                       child: const Text("Yes"),
-  //                                       onPressed: () {
-  //                                         Navigator.pop(dialogContext);
-  //                                         _confirmRoadSelection(roadData);
-  //                                         Navigator.pop(context);
-  //                                       },
-  //                                     ),
-  //                                   ],
-  //                                 );
-  //                               },
-  //                             );
-  //                           },
-  //                           style: ElevatedButton.styleFrom(
-  //                             backgroundColor: Colors.orange.shade700,
-  //                             shape: RoundedRectangleBorder(
-  //                               borderRadius: BorderRadius.circular(10),
-  //                             ),
-  //                           ),
-  //                           child: const Text(
-  //                             "Confirm Road Selection",
-  //                             style: TextStyle(
-  //                               color: Colors.white,
-  //                               fontSize: 15,
-  //                             ),
-  //                           ),
-  //                         ),
-  //                     ],
-  //                   ),
-  //                 ],
-  //               ),
-  //             ),
-  //           ),
-  //         ),
-  //       );
-  //     },
-  //   );
-  // }
-
-  //---------------------------------------------- Deselect the Road Data -------------------------------------------------------------
   void _deselectRoadOnMap(Map<String, dynamic> roadData) {
     final roadId = roadData['road_id'].toString();
 
@@ -606,25 +514,127 @@ class WelcomescreenState extends State<Welcomescreen> {
     'Kachcha': Colors.brown,
   };
 
-  Future<void> _fetchPolylineDataFromBounds() async {
-    if (_missingRoadVisible) return;
-    if (!_controller.isCompleted) return;
-
-    final controller = await _controller.future;
-    if (controller == null) return;
-
+  Future<void> _fetch12mRoads() async {
     final queryParams = <String, dynamic>{};
     final prefs = await SharedPreferences.getInstance();
-
     final nagarNigam = prefs.getString('city') ?? prefs.getString('nagarNigam');
-
-    debugPrint("🛣 ROAD API NAGAR NIGAM: $nagarNigam");
 
     if (nagarNigam == null || nagarNigam.trim().isEmpty) {
       debugPrint("❌ city/nagarNigam not found in SharedPreferences");
       return;
     }
 
+    queryParams['nagarNigam'] = nagarNigam.trim();
+    final z = widget.zoneName?.trim();
+    if (z != null && z.isNotEmpty) queryParams['zoneName'] = [z];
+    if (widget.wardName.isNotEmpty) queryParams['wardName'] = [widget.wardName];
+
+    // Assuming a different endpoint as requested
+    final uri = buildUriWithMultipleValues(
+      '${AppConstants.baseURL}api/roads_mobile/filter_above12m',
+      queryParams,
+    );
+
+    try {
+      final response = await http.get(uri, headers: await _authHeaders());
+      debugPrint("🛣 12M ROAD API URL: $uri");
+      if (response.statusCode != 200) return;
+
+      final List data = json.decode(response.body);
+      final List<Map<String, dynamic>> roadsData = data.cast<Map<String, dynamic>>();
+
+      // Pre-parse segments in ONE batch isolate pass
+      final List<String> wkts = roadsData.map((e) => (e['wkt_geom'] ?? e['geomWKT'] ?? e['geojson'] ?? '').toString()).toList();
+      final List<List<List<LatLng>>> parsedSegments = await compute(parseWKTBatch, wkts);
+
+      if (mounted) {
+        setState(() {
+          _12mRoadsData = roadsData;
+          _12mRoadParsedSegments = parsedSegments;
+        });
+        await _render12mPolylines();
+      }
+    } catch (e) {
+      debugPrint('❌ Error fetching 12m roads: $e');
+    }
+  }
+
+  Future<void> _render12mPolylines() async {
+    // 🛡️ Guard against race conditions during fetch
+    if (!mounted || _12mRoadsData.length != _12mRoadParsedSegments.length) return;
+    
+    Set<Polyline> polylineSet = {};
+    for (int i = 0; i < _12mRoadsData.length; i++) {
+      final item = _12mRoadsData[i];
+      final segments = _12mRoadParsedSegments[i];
+      final roadId = item['road_id']?.toString() ?? '12m_$i';
+
+      int segIndex = 0;
+      for (final segment in segments) {
+        final points = decimatePoints(segment, _currentZoomLevel);
+        
+        // 🌟 "BLUR" EFFECT: Add multiple layers if opacity is reduced
+        if (_12mRoadOpacity < 1.0) {
+          polylineSet.add(
+            Polyline(
+              polylineId: PolylineId('12m_${roadId}_seg_${segIndex}_glow'),
+              points: points,
+              width: 12,
+              color: Colors.cyanAccent.withOpacity(_12mRoadOpacity * 0.3),
+              zIndex: 29,
+            ),
+          );
+        }
+
+        polylineSet.add(
+          Polyline(
+            polylineId: PolylineId('12m_${roadId}_seg_$segIndex'),
+            points: points,
+            width: 8,
+            color: Colors.cyanAccent.withOpacity(_12mRoadOpacity),
+            zIndex: 30,
+            consumeTapEvents: true,
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("12m Road: ${item['road_name'] ?? 'N/A'} (Width: ${item['row_meter'] ?? '>=12'}m)"))
+              );
+            },
+          ),
+        );
+        segIndex++;
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _12mRoadPolylines = polylineSet;
+      });
+    }
+  }
+
+  Future<void> _fetchPolylineDataFromBounds({bool force = false, bool preventZoom = false}) async {
+    if (_missingRoadVisible) return;
+    if (!_controller.isCompleted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final nagarNigam = prefs.getString('city') ?? prefs.getString('nagarNigam');
+
+    if (nagarNigam == null || nagarNigam.trim().isEmpty) {
+      debugPrint("❌ city/nagarNigam not found in SharedPreferences");
+      return;
+    }
+
+    final String currentKey = "${nagarNigam.trim()}_${widget.zoneName?.trim()}_${widget.wardName.trim()}_${widget.roadAgeCategory.join(',')}_${_activeMaterial}";
+
+    // ⚡ INSTANT CACHE CHECK: If already fetched for this ward/filters and not forcing reload, render immediately from memory (0ms network time)!
+    if (!force && currentKey == _lastFetchedRoadsKey && _allRoadsData.isNotEmpty) {
+      await _renderPolylines(_allRoadsData);
+      return;
+    }
+
+    if (_isFetchingRoads) return; // 🛡️ Prevent duplicate concurrent HTTP requests
+    _isFetchingRoads = true;
+
+    final queryParams = <String, dynamic>{};
     queryParams['nagarNigam'] = nagarNigam.trim();
 
     final z = widget.zoneName?.trim();
@@ -646,23 +656,42 @@ class WelcomescreenState extends State<Welcomescreen> {
     );
 
     try {
+      debugPrint("📡 [NET] Fetching roads from: $uri");
       final response = await http.get(uri, headers: await _authHeaders());
 
-      debugPrint("🛣 ROAD API URL: $uri");
-      debugPrint("🛣 ROAD API STATUS: ${response.statusCode}");
-      debugPrint("🛣 ROAD API BODY: ${response.body}");
+      debugPrint("📡 [NET] Status: ${response.statusCode}");
       if (response.statusCode != 200) return;
 
       final List data = json.decode(response.body);
+      final int totalApiRoads = data.length;
+
+      final int roadsWithId = data.where((road) {
+        final id = road['road_id']?.toString().trim();
+        return id != null && id.isNotEmpty;
+      }).length;
+
+      final int roadsWithoutId = data.where((road) {
+        return road['road_id'] == null;
+      }).length;
+
+      debugPrint("========== ROAD COUNT DEBUG ==========");
+      debugPrint("TOTAL ROADS FROM API: $totalApiRoads");
+      debugPrint("ROADS WITH ROAD_ID: $roadsWithId");
+      debugPrint("ROADS WITHOUT ROAD_ID: $roadsWithoutId");
+      debugPrint("======================================");
+      _lastFetchedRoadsKey = currentKey;
       
       bool wardChanged = false;
       if (data.isNotEmpty) {
         final firstRoad = data.first;
         final newZone = firstRoad['zone_name']?.toString() ?? firstRoad['zoneName']?.toString();
         final newWard = firstRoad['ward_no']?.toString() ?? firstRoad['wardNo']?.toString();
+        final newZoneNo = firstRoad['zone_no']?.toString()
+            ?? firstRoad['zoneNo']?.toString();
         
         if (newWard != _selectedWard || newZone != _selectedZone) {
           wardChanged = true;
+          _wktSegmentCache.clear();
         }
 
         Set<String> ownershipSet = {};
@@ -675,30 +704,85 @@ class WelcomescreenState extends State<Welcomescreen> {
 
         setState(() {
           _selectedZone = newZone;
+          _selectedZoneNo = newZoneNo?.trim();
           _selectedWard = newWard;
           _allRoadsData = data.cast<Map<String, dynamic>>();
           
           if (wardChanged) {
-            loadAllPointAssets(); // 👈 ONLY REFRESH IF WARD CHANGED
+            loadAllPointAssets();
           }
         });
       }
 
-      await _renderPolylines(data);
+      await _renderPolylines(data, preventZoom: preventZoom);
     } catch (e) {
       debugPrint('❌ Error fetching polylines: $e');
+    } finally {
+      _isFetchingRoads = false;
     }
   }
 
-  Future<void> _renderPolylines(List data) async {
+  Future<void> _renderPolylines(List data, {bool preventZoom = false}) async {
+    if (!_controller.isCompleted) return;
+    try {
+      final controller = await _controller.future;
+      _currentVisibleRegion = await controller.getVisibleRegion();
+    } catch (_) {}
+
+    // ⚡ ZOOM THRESHOLD: Do NOT render roads when zoomed out far (< 14.0 zoom)
+    if (_currentZoomLevel < 14.0) {
+      if (mounted) {
+        setState(() {
+          _polylines = {};
+          _roadCount = 0;
+        });
+      }
+      return;
+    }
+
+    final LatLngBounds? currentBounds = _currentVisibleRegion;
+
+    // 1. Collect unparsed WKT geometries
+    final List<Map<String, dynamic>> unparsedItems = [];
+    final List<String> unparsedWkts = [];
+
+    for (final rawItem in data) {
+      if (rawItem is! Map) continue;
+      final item = Map<String, dynamic>.from(rawItem);
+      final roadId = item['road_id']?.toString();
+      final String? wkt = item['wkt_geom']?.toString() ?? item['geomWKT']?.toString() ?? item['geojson']?.toString();
+
+      if (roadId != null && wkt != null && wkt.isNotEmpty && !_roadGeomCache.containsKey(roadId)) {
+        unparsedItems.add(item);
+        unparsedWkts.add(wkt);
+      }
+    }
+
+    // 2. Batch parse all new WKT geometries in ONE background isolate pass
+    if (unparsedWkts.isNotEmpty) {
+      final List<ParsedRoadGeometry> batchParsed = await compute(parseWKTBatchWithBBox, unparsedWkts);
+      for (int i = 0; i < unparsedItems.length; i++) {
+        final roadId = unparsedItems[i]['road_id'].toString();
+        _roadGeomCache[roadId] = batchParsed[i];
+      }
+    }
+
+    // 3. Build polyline widgets using spatial bounding box checks (< 1ms per frame!)
     Set<Polyline> polylineSet = {};
     int roadCount = 0;
 
     for (final item in data) {
-      final String? wkt = item['wkt_geom'];
-      if (wkt == null) continue;
+      if (item is! Map) continue;
+      final roadId = item['road_id']?.toString();
+      if (roadId == null) continue;
 
-      final roadId = item['road_id'].toString();
+      final geom = _roadGeomCache[roadId];
+      if (geom == null || geom.segments.isEmpty) continue;
+
+      // ⚡ FAST SPATIAL BBOX FILTER: Skip off-screen roads in 1 nanosecond!
+      if (currentBounds != null && !geom.isInBounds(currentBounds)) {
+        continue;
+      }
 
       Color lineColor = Colors.green;
       final condition = item['condition']?.toString();
@@ -716,21 +800,22 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (item['is_confirmed'] == true) lineColor = Colors.blueAccent.shade700;
       if (_selectedRoadIds.contains(roadId)) lineColor = Colors.orange.shade700;
 
-      final double? rowMeter = double.tryParse(
-        item['row_meter']?.toString() ?? '',
-      );
-
+      final double? rowMeter = double.tryParse(item['row_meter']?.toString() ?? '');
       if (rowMeter != null && rowMeter >= 12) {
         lineColor = Colors.cyanAccent.shade700;
       }
 
       if (item['is_updated'] == true) lineColor = Colors.deepPurpleAccent;
 
-      final segments = await compute<String, List<List<LatLng>>>(parseWKTToSegments, wkt);
+      final notExists = item['not_exists'] == true || item['not_exists']?.toString().toLowerCase() == 'true';
+      if (notExists) {
+        lineColor = Colors.tealAccent;
+      }
 
       int segIndex = 0;
-      for (final segment in segments) {
+      for (final segment in geom.segments) {
         final points = decimatePoints(segment, _currentZoomLevel);
+
         polylineSet.add(
           Polyline(
             polylineId: PolylineId('${roadId}_seg_$segIndex'),
@@ -743,7 +828,7 @@ class WelcomescreenState extends State<Welcomescreen> {
               if (!_isSelectingRoad && !_isUpdatingRoad) return;
 
               if (_isUpdatingRoad) {
-                _openRoadUpdateForm(item);
+                _showRoadExistConfirmDialog(Map<String, dynamic>.from(item));
                 return;
               }
 
@@ -755,8 +840,7 @@ class WelcomescreenState extends State<Welcomescreen> {
                     _selectedRoadIds.add(roadId);
                   }
                 });
-                _renderPolylines(_allRoadsData); // 👈 LOCAL REDRAW, NO NETWORK
-                // _showRoadInfoPopup(context, item);
+                _renderPolylines(_allRoadsData); // 👈 LOCAL REDRAW, INSTANT 0ms
               }
             },
           ),
@@ -771,6 +855,22 @@ class WelcomescreenState extends State<Welcomescreen> {
         _polylines = polylineSet;
         _roadCount = roadCount;
       });
+    }
+
+    if (!preventZoom) {
+      if (_controller.isCompleted && !_hasAutoZoomedMap) {
+        // Collect all points from polys to get valid bounds.
+        List<LatLng> allPoints = [];
+        for (var poly in polylineSet) {
+          allPoints.addAll(poly.points);
+        }
+        if (allPoints.isNotEmpty) {
+          final controller = await _controller.future;
+          LatLngBounds bounds = _getBoundsFromLatLngList(allPoints);
+          controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
+          _hasAutoZoomedMap = true;
+        }
+      }
     }
   }
 
@@ -906,6 +1006,77 @@ class WelcomescreenState extends State<Welcomescreen> {
     showSmallHint("Tap on map to mark transformers");
   }
 
+  void _showRoadExistConfirmDialog(Map<String, dynamic> roadData) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text("Confirm Road"),
+        content: const Text("Is this road exists on ground?"),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _markRoadNotExist(roadData);
+            },
+            child: const Text("No"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade700,
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+              _openRoadUpdateForm(roadData);
+            },
+            child: const Text("Yes", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _markRoadNotExist(Map<String, dynamic> roadData) async {
+    final roadId = roadData['road_id']?.toString();
+    if (roadId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final nagarNigam = prefs.getString('city') ?? prefs.getString('nagarNigam') ?? "";
+    final username = prefs.getString('username') ?? "mobile_unknown";
+
+    // ✅ Using a standard endpoint for marking as not existing
+    final url = Uri.parse('${AppConstants.baseURL}api/roads_mobile/markNotExist')
+        .replace(queryParameters: {
+      'roadId': roadId,
+      'nagarNigam': nagarNigam,
+    });
+
+    debugPrint("📡 MARKING ROAD AS NOT EXIST: $url");
+
+    try {
+      final response = await http.post(url, headers: {'X-User': username});
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Road marked as NOT EXIST successfully")),
+        );
+        _fetchPolylineDataFromBounds(); // Refresh map
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to mark road: ${response.statusCode}")),
+        );
+      }
+    } catch (e) {
+      debugPrint("❌ Error marking road not exist: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    }
+  }
+
   Future<void> _openRoadUpdateForm(Map<String, dynamic> roadData) async {
     // if (await DeviceUtils.blockIfRooted(context)) return;
 
@@ -968,9 +1139,14 @@ class WelcomescreenState extends State<Welcomescreen> {
       return;
     }
 
+    if (result == true || 
+        (result is Map && (result['action'] == 'success' || result['success'] == true))) {
+      // Refresh road data silently without zooming
+      await _fetchPolylineDataFromBounds(preventZoom: true);
+      return;
+    }
 
-
-    if (result['action'] == 'mark_transforme') {
+    if (result is Map && result['action'] == 'mark_transforme') {
       _startTransformerMarking(
         Map<String, dynamic>.from(result['roadData']),
         Map<String, dynamic>.from(result['formData']),
@@ -1322,8 +1498,14 @@ class WelcomescreenState extends State<Welcomescreen> {
           GoogleMap(
             key: mapKey,
             // padding: EdgeInsets.only(bottom: 120, right: 20),
+            // onTap: (LatLng tappedPoint) async {
+            //   if (_isPointMarking) {
+
             onTap: (LatLng tappedPoint) async {
+
               if (_isPointMarking) {
+                await _closeAllMarkerInfoWindows();
+                if (!mounted) return;
                 // =================================================
                 // TRAFFIC SAFETY FEATURES
                 // =================================================
@@ -1400,13 +1582,33 @@ class WelcomescreenState extends State<Welcomescreen> {
                       _parkingAreaPolygonPreview = Polygon(
                         polygonId: const PolygonId("parking_area_polygon"),
                         points: List<LatLng>.from(_parkingAreaPolygonPoints),
-                        fillColor: Colors.blueAccent.withValues(alpha: 0.3),
+                        fillColor: Colors.blueAccent.withOpacity(0.3),
                         strokeColor: Colors.blueAccent,
                         strokeWidth: 3,
                       );
                     }
                   });
                   showSmallHint("Point ${_parkingAreaPolygonPoints.length} added");
+                  return;
+                }
+
+                // =================================================
+                // GREEN MEDIAN (POLYGON)
+                // =================================================
+                if (selectedPointAsset == "Green Median") {
+                  setState(() {
+                    _greenMedianPolygonPoints.add(tappedPoint);
+                    if (_greenMedianPolygonPoints.length >= 3) {
+                      _greenMedianPolygonPreview = Polygon(
+                        polygonId: const PolygonId("green_median_polygon"),
+                        points: List<LatLng>.from(_greenMedianPolygonPoints),
+                        fillColor: Colors.green.withOpacity(0.35),
+                        strokeColor: Colors.green.shade700,
+                        strokeWidth: 3,
+                      );
+                    }
+                  });
+                  showSmallHint("Point ${_greenMedianPolygonPoints.length} added");
                   return;
                 }
 
@@ -1444,10 +1646,10 @@ class WelcomescreenState extends State<Welcomescreen> {
                   _newRoadPoints.add(pointToAdd);
 
                   _newRoadPreview = Polyline(
-                    polylineId: const PolylineId("new_road"),
+                    polylineId: PolylineId("new_road_${_newRoadPoints.length}_${DateTime.now().millisecondsSinceEpoch}"),
                     color: Colors.purpleAccent,
                     width: 5,
-                    points: _newRoadPoints,
+                    points: List<LatLng>.from(_newRoadPoints),
                   );
                 });
 
@@ -1482,10 +1684,19 @@ class WelcomescreenState extends State<Welcomescreen> {
             },
 
             onCameraMove: (position) {
+              final bool oldPointVisible = _currentZoomLevel > 15.5;
+              final bool newPointVisible = position.zoom > 15.5;
+
+              final bool oldRoadVisible = _currentZoomLevel >= 14.0;
+              final bool newRoadVisible = position.zoom >= 14.0;
+
               _currentZoomLevel = position.zoom;
+
+              if (oldPointVisible != newPointVisible || oldRoadVisible != newRoadVisible) {
+                if (mounted) setState(() {});
+              }
             },
             onCameraIdle: () {
-              // if (_isDrawingRoad || _missingRoadVisible) return;
               if (_isDrawingRoad ||
                   _missingRoadVisible ||
                   _isPointMarking) {
@@ -1493,25 +1704,35 @@ class WelcomescreenState extends State<Welcomescreen> {
               }
 
               _cameraIdleTimer?.cancel();
-              _cameraIdleTimer = Timer(const Duration(milliseconds: 600), () {
-                if (mounted) _fetchPolylineDataFromBounds();
+              _cameraIdleTimer = Timer(const Duration(milliseconds: 100), () async {
+                if (mounted && _controller.isCompleted) {
+                  try {
+                    final controller = await _controller.future;
+                    _currentVisibleRegion = await controller.getVisibleRegion();
+                  } catch (_) {}
+
+                  if (_currentZoomLevel >= 14.0) {
+                    await _fetchPolylineDataFromBounds();
+                    if (_allRoadsData.isNotEmpty) {
+                      await _renderPolylines(_allRoadsData);
+                    }
+                  } else {
+                    if (mounted) {
+                      setState(() {
+                        _polylines = {};
+                        _roadCount = 0;
+                      });
+                    }
+                  }
+
+                  if (_show12mRoads) _render12mPolylines();
+                }
               });
             },
 
             markers: {
               ..._markers,
-              if (_currentZoomLevel > 15.5) ...{
-                ..._manholeMarkers,
-                ..._busStopMarkers,
-                ..._roadSignageMarkers,
-                ..._trafficSafetyMarkers,
-                ..._pavementDistressMarkers,
-                ..._toiletMarkers,
-                ..._electricPoleMarkers,
-                ..._transformerMarkers,
-                ..._streetLightMarkers,
-                ..._telecomBoxMarkers,
-              },
+              if (_currentZoomLevel > 15.5) ..._getVisiblePointAssetMarkers(_currentVisibleRegion),
 
               if (_isMarkingParking) ..._buildParkingMarkers(),
 
@@ -1519,14 +1740,25 @@ class WelcomescreenState extends State<Welcomescreen> {
               if (_isMarkingTransformers) ..._buildTransformerMarkers(),
 
               // Point Data marker
+              // if (_isPointMarking && _selectedPointLocation != null)
+              //   Marker(
+              //     markerId: const MarkerId('point_data_selected_marker'),
+              //     position: _selectedPointLocation!,
+              //     icon: _selectionIcon ?? BitmapDescriptor.defaultMarker,
+              //     infoWindow: InfoWindow(
+              //       title: selectedPointAsset ?? "Point Asset",
+              //     ),
+              //   ),
+
+              // Point Data marker - No InfoWindow
               if (_isPointMarking && _selectedPointLocation != null)
                 Marker(
                   markerId: const MarkerId('point_data_selected_marker'),
                   position: _selectedPointLocation!,
                   icon: _selectionIcon ?? BitmapDescriptor.defaultMarker,
-                  infoWindow: InfoWindow(
-                    title: selectedPointAsset ?? "Point Asset",
-                  ),
+
+                  // Disable InfoWindow for the temporary marker
+                  infoWindow: InfoWindow.noText,
                 ),
             },
 
@@ -1536,14 +1768,18 @@ class WelcomescreenState extends State<Welcomescreen> {
             polygons: {
               ..._zonePolygons,
               ..._parkingAreaPolygons,
+              ..._greenMedianPolygons,
               ..._pavementDistressPolygons,
-
-
 
               if (_isPointMarking &&
                   selectedPointAsset == "Parking Area" &&
                   _parkingAreaPolygonPreview != null)
                 _parkingAreaPolygonPreview!,
+
+              if (_isPointMarking &&
+                  selectedPointAsset == "Green Median" &&
+                  _greenMedianPolygonPreview != null)
+                _greenMedianPolygonPreview!,
             }, // Merge both sets // Display updated ward boundaries
 
             zoomControlsEnabled: false,
@@ -1552,6 +1788,7 @@ class WelcomescreenState extends State<Welcomescreen> {
               ..._polylines,
               ...newRoadPolylines,
               ..._trafficSafetyLines,
+              ..._12mRoadPolylines,
 
               if (_missingRoadVisible) ..._missingRoadPolylines,
               if (_highlightedPolyline != null) _highlightedPolyline!,
@@ -1662,15 +1899,15 @@ class WelcomescreenState extends State<Welcomescreen> {
               ),
             ),
           // =====================================================
-// TRAFFIC SAFETY LINE UNDO
-// =====================================================
+          // TRAFFIC SAFETY LINE UNDO
+          // =====================================================
           if (_isPointMarking &&
               selectedPointAsset == "Traffic Safety Features Layer" &&
               _trafficSafetyGeometryType == "Line" &&
               _trafficSafetyLinePoints.isNotEmpty)
             Positioned(
-              bottom: 145,
-              right: 20,
+              bottom: 220,
+              right: 6,
               child: FloatingActionButton(
                 heroTag: "traffic_safety_line_undo_main",
                 mini: true,
@@ -1709,8 +1946,8 @@ class WelcomescreenState extends State<Welcomescreen> {
               selectedPointAsset == "Parking Area" &&
               _parkingAreaPolygonPoints.isNotEmpty)
             Positioned(
-              bottom: 145,
-              right: 20,
+              bottom: 220,
+              right: 6,
               child: FloatingActionButton(
                 heroTag: "parking_area_polygon_undo_main",
                 mini: true,
@@ -1724,11 +1961,73 @@ class WelcomescreenState extends State<Welcomescreen> {
                       _parkingAreaPolygonPreview = Polygon(
                         polygonId: const PolygonId("parking_area_polygon"),
                         points: _parkingAreaPolygonPoints.toList(),
-                        fillColor: Colors.blueAccent.withValues(alpha: 0.3),
+                        fillColor: Colors.blueAccent.withOpacity(0.3),
                         strokeColor: Colors.blueAccent,
                         strokeWidth: 3,
                       );
                     }
+                  });
+                },
+                child: const Icon(
+                  Icons.undo,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          // =====================================================
+          // GREEN MEDIAN POLYGON UNDO
+          // =====================================================
+          if (_isPointMarking &&
+              selectedPointAsset == "Green Median" &&
+              _greenMedianPolygonPoints.isNotEmpty)
+            Positioned(
+              bottom: 220,
+              right: 6,
+              child: FloatingActionButton(
+                heroTag: "green_median_polygon_undo_main",
+                mini: true,
+                backgroundColor: Colors.green.shade800,
+                onPressed: () {
+                  setState(() {
+                    _greenMedianPolygonPoints.removeLast();
+                    if (_greenMedianPolygonPoints.length < 3) {
+                      _greenMedianPolygonPreview = null;
+                    } else {
+                      _greenMedianPolygonPreview = Polygon(
+                        polygonId: const PolygonId("green_median_polygon"),
+                        points: _greenMedianPolygonPoints.toList(),
+                        fillColor: Colors.green.withOpacity(0.35),
+                        strokeColor: Colors.green.shade700,
+                        strokeWidth: 3,
+                      );
+                    }
+                  });
+                },
+                child: const Icon(
+                  Icons.undo,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          // =====================================================
+          // SINGLE POINT ASSET UNDO (Manhole, Bus Stop, Road Signage, etc.)
+          // =====================================================
+          if (_isPointMarking &&
+              _selectedPointLocation != null &&
+              selectedPointAsset != "Parking Area" &&
+              selectedPointAsset != "Green Median" &&
+              !(selectedPointAsset == "Traffic Safety Features Layer" && _trafficSafetyGeometryType == "Line"))
+            Positioned(
+              bottom: 220,
+              right: 6,
+              child: FloatingActionButton(
+                heroTag: "single_point_asset_undo_main",
+                mini: true,
+                backgroundColor: Colors.orange.shade800,
+                tooltip: "Undo marked point",
+                onPressed: () {
+                  setState(() {
+                    _selectedPointLocation = null;
                   });
                 },
                 child: const Icon(
@@ -1743,34 +2042,44 @@ class WelcomescreenState extends State<Welcomescreen> {
           if (_isPointMarking)
             Positioned(
               bottom: 90,
-              left: 20,
-              right: 20,
+              left: 60,
+              right: 60,
               child: Row(
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: _cancelPointMarking,
-                      icon: const Icon(Icons.close),
-                      label: const Text("Cancel"),
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text("Cancel", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.grey.shade700,
                         foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        minimumSize: const Size(0, 36),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
                       ),
                     ),
                   ),
 
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
 
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: _canConfirmPointAsset()
                           ? _confirmPointAsset
                           : null,
-                      icon: const Icon(Icons.check),
-                      label: const Text("Confirm"),
+                      icon: const Icon(Icons.check, size: 18),
+                      label: const Text("Confirm", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.orange.shade700,
                         foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        minimumSize: const Size(0, 36),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
                       ),
                     ),
                   ),
@@ -2130,7 +2439,7 @@ class WelcomescreenState extends State<Welcomescreen> {
                 ),
                 padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.9),
+                  color: Colors.white.withOpacity(0.9),
                   border: Border.all(color: Colors.grey.shade400),
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
@@ -2305,8 +2614,11 @@ class WelcomescreenState extends State<Welcomescreen> {
             child: FloatingActionButton(
               heroTag: "point_data_fab",
               mini: true,
-              backgroundColor: Colors.orange.shade700,
-              child: const Icon(Icons.location_pin, color: Colors.white),
+              backgroundColor: _isPointMarking ? Colors.indigo : Colors.orange.shade700,
+              child: Icon(
+                _isPointMarking ? Icons.pin_drop : Icons.location_pin,
+                color: Colors.white,
+              ),
               onPressed: _showPointDataPopup,
             ),
           ),
@@ -2337,6 +2649,9 @@ class WelcomescreenState extends State<Welcomescreen> {
   List<LatLng> _parkingAreaPolygonPoints = [];
   Polygon? _parkingAreaPolygonPreview;
 
+  List<LatLng> _greenMedianPolygonPoints = [];
+  Polygon? _greenMedianPolygonPreview;
+
   Future<void> _showPointDataPopup() async {
     final asset = await showDialog<String>(
       context: context,
@@ -2345,11 +2660,12 @@ class WelcomescreenState extends State<Welcomescreen> {
         children: [
           _assetOption(context, Icons.water_drop, "Manhole"),
           _assetOption(context, Icons.directions_bus, "Bus Stop"),
+          _assetOption(context, Icons.park, "Green Median"),
           _assetOption(context, Icons.local_parking, "Parking Area"),
           _assetOption(context, Icons.signpost, "Road Signage"),
           _assetOption(context, Icons.traffic, "Traffic Safety Features Layer"),
           _assetOption(context, Icons.wc, "Public Toilet"),
-          _assetOption(context, Icons.electrical_services, "Transformer"),
+          _assetOption(context, Icons.electrical_services, "Transformer/ RMU"),
           _assetOption(context, Icons.lightbulb_outline, "Street Light"),
           _assetOption(context, Icons.inventory_2_outlined, "Telecom Box"),
           // _assetOption(context, Icons.light, "Street Light"),
@@ -2392,6 +2708,21 @@ class WelcomescreenState extends State<Welcomescreen> {
         );
       }
 
+      return;
+    }
+
+    if (asset == "Green Median") {
+      _disableAllModes();
+
+      setState(() {
+        selectedPointAsset = asset;
+        _selectedPointLocation = null;
+        _greenMedianPolygonPoints.clear();
+        _greenMedianPolygonPreview = null;
+        _isPointMarking = true;
+      });
+
+      showSmallHint("Tap multiple points to draw Green Median polygon");
       return;
     }
 
@@ -2562,7 +2893,7 @@ class WelcomescreenState extends State<Welcomescreen> {
                     width: 44,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: _appOrange.withValues(alpha: 0.9),
+                      color: _appOrange.withOpacity(0.9),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -2636,6 +2967,8 @@ class WelcomescreenState extends State<Welcomescreen> {
       mode = "Create Road";
     else if (_missingRoadVisible)
       mode = "Missing Road";
+    else if (_isPointMarking)
+      mode = "${selectedPointAsset ?? 'Point Asset'} Marking";
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -2784,7 +3117,7 @@ class WelcomescreenState extends State<Welcomescreen> {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: active ? _appOrange.withValues(alpha: 0.08) : Colors.transparent,
+          color: active ? _appOrange.withOpacity(0.08) : Colors.transparent,
           border: Border(
             left: BorderSide(
               color: active ? _appOrange : Colors.transparent,
@@ -2848,7 +3181,7 @@ class WelcomescreenState extends State<Welcomescreen> {
                   ),
                 ),
               ),
-              Divider(color: _appOrange.withValues(alpha: 0.6), thickness: 1),
+              Divider(color: _appOrange.withOpacity(0.6), thickness: 1),
               ...children,
             ],
           ),
@@ -2950,24 +3283,67 @@ class WelcomescreenState extends State<Welcomescreen> {
   Future<void> _openRoadCreationForm() async {
     final geometry = _getWKTFromPoints();
 
-    await Navigator.push(
+    // Get actual zone_no from API data or zone name
+    String zoneNo = _selectedZoneNo?.trim() ?? '';
+    if (zoneNo.isEmpty && widget.zoneName != null) {
+      final match = RegExp(r'\d+').firstMatch(widget.zoneName!);
+      if (match != null) {
+        zoneNo = match.group(0)!;
+      } else {
+        zoneNo = widget.zoneName!.trim();
+      }
+    }
+    if (zoneNo.isEmpty && _selectedZone != null) {
+      final match = RegExp(r'\d+').firstMatch(_selectedZone!);
+      if (match != null) {
+        zoneNo = match.group(0)!;
+      } else {
+        zoneNo = _selectedZone!.trim();
+      }
+    }
+
+    if (zoneNo.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              "Zone number is unavailable. Please refresh road data."
+          ),
+        ),
+      );
+      return;
+    }
+
+    final bool? saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => NewRoadFormScreen(
           geometry: geometry,
           latitude: _currentLat,
           longitude: _currentLng,
-          roadAgeCategory:
-              widget.roadAgeCategory, // Pass the required parameters
+          roadAgeCategory: widget.roadAgeCategory,
+          zoneNo: zoneNo,
           zoneName: widget.zoneName,
+
           wardNo: widget.wardNo,
           wardName: widget.wardName,
         ),
       ),
     );
 
-    // 🔥 ALWAYS clear preview when returning
-    _exitCreateRoadMode();
+    if (saved == true) {
+      if (mounted) {
+        setState(() {
+          _isDrawingRoad = false;
+          _isExtending = false;
+          _newRoadPoints.clear();
+          _newRoadPreview = null;
+        });
+        // Just reload the roads layer silently without changing camera
+        await _fetchPolylineDataFromBounds(preventZoom: true);
+      }
+    } else {
+      _exitCreateRoadMode();
+    }
   }
 
   String _getWKTFromPoints() {
@@ -3005,19 +3381,19 @@ class WelcomescreenState extends State<Welcomescreen> {
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        Colors.orange.shade500.withValues(alpha: 0.95),
-                        Colors.deepOrange.shade100.withValues(alpha: 0.9),
+                        Colors.orange.shade500.withOpacity(0.95),
+                        Colors.deepOrange.shade100.withOpacity(0.9),
                       ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.3),
+                      color: Colors.white.withOpacity(0.3),
                       width: 1,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
+                        color: Colors.black.withOpacity(0.4),
                         blurRadius: 12,
                         offset: const Offset(0, -3),
                       ),
@@ -3049,7 +3425,7 @@ class WelcomescreenState extends State<Welcomescreen> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      Divider(color: _appOrange.withValues(alpha: 0.6), thickness: 1),
+                      Divider(color: _appOrange.withOpacity(0.6), thickness: 1),
                       const SizedBox(height: 6),
                       ..._mapOptions(context),
                       const SizedBox(height: 10),
@@ -3077,8 +3453,8 @@ class WelcomescreenState extends State<Welcomescreen> {
         leading: Icon(icon, color: selected ? Colors.white : Colors.white70),
         title: Text(title, style: textStyle),
         tileColor: selected
-            ? Colors.white.withValues(alpha: 0.2)
-            : Colors.white.withValues(alpha: 0.05),
+            ? Colors.white.withOpacity(0.2)
+            : Colors.white.withOpacity(0.05),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         onTap: () {
           setState(() => _currentMapType = type);
@@ -3276,6 +3652,18 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (item['is_updated'] == true) {
         lineColor = Colors.deepPurpleAccent;
       }
+
+      final notExists = item['not_exists'] == true || item['not_exists']?.toString().toLowerCase() == 'true';
+      if (notExists) {
+        lineColor = Colors.tealAccent; // High priority color for roads that don't exist
+      }
+
+      debugPrint(
+          'road_id=${item['road_id']}, '
+          'not_exists=${item['not_exists']}, '
+          'is_updated=${item['is_updated']}'
+      );
+
       polylineSet.add(
         Polyline(
           polylineId: PolylineId(roadId),
@@ -3302,7 +3690,7 @@ class WelcomescreenState extends State<Welcomescreen> {
 
             // ✏️ If in update mode, open edit form instead of info popup
             if (_isUpdatingRoad) {
-              _openRoadUpdateForm(item);
+              _showRoadExistConfirmDialog(item);
               return;
             }
 
@@ -3368,7 +3756,7 @@ class WelcomescreenState extends State<Welcomescreen> {
   }
 
   Future<BitmapDescriptor> createTextLabelBitmap(String text) async {
-    final double devicePixelRatio = View.of(context).devicePixelRatio;
+    final double devicePixelRatio = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(recorder);
 
@@ -3379,7 +3767,7 @@ class WelcomescreenState extends State<Welcomescreen> {
           fontSize: 28, // ⬅️ Adjusted for density
           fontWeight: FontWeight.bold,
           color: Colors.black,
-          backgroundColor: Colors.white.withValues(alpha: 0.8),
+          backgroundColor: Colors.white.withOpacity(0.8),
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -3392,7 +3780,7 @@ class WelcomescreenState extends State<Welcomescreen> {
     final double height = textPainter.height + 4;
 
     // Draw background
-    final Paint bgPaint = Paint()..color = Colors.white.withValues(alpha: 0.9);
+    final Paint bgPaint = Paint()..color = Colors.white.withOpacity(0.9);
     canvas.drawRect(Rect.fromLTWH(0, 0, width, height), bgPaint);
     
     // Draw text
@@ -4036,7 +4424,10 @@ class WelcomescreenState extends State<Welcomescreen> {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('authToken');
 
-    final headers = <String, String>{'Accept': 'application/json'};
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      'Accept-Encoding': 'gzip, deflate', // ⚡ 80% Faster Network Download Transfer
+    };
 
     if (jsonBody) {
       headers['Content-Type'] = 'application/json';
@@ -4166,6 +4557,11 @@ class WelcomescreenState extends State<Welcomescreen> {
 
 
 
+    // Green Median
+    if (selectedPointAsset == "Green Median") {
+      return _greenMedianPolygonPoints.length >= 3;
+    }
+
     // Parking Area
     if (selectedPointAsset == "Parking Area") {
       return _parkingAreaPolygonPoints.length >= 3;
@@ -4240,7 +4636,7 @@ class WelcomescreenState extends State<Welcomescreen> {
           loadAllPointAssets(); // 👈 REFRESH
         }
 
-        _clearPointAssetMarking();
+        _resetPointAfterSave();
 
         return;
       }
@@ -4295,6 +4691,12 @@ class WelcomescreenState extends State<Welcomescreen> {
 
 
 
+    if (asset == "Green Median") {
+      if (_greenMedianPolygonPoints.length < 3) return;
+      await _submitGreenMedianDirectly(_greenMedianPolygonPoints.toList());
+      return;
+    }
+
     if (asset == "Parking Area") {
       if (_parkingAreaPolygonPoints.length < 3) return;
       await _submitParkingDirectly(_parkingAreaPolygonPoints.toList());
@@ -4336,7 +4738,7 @@ class WelcomescreenState extends State<Welcomescreen> {
         loadAllPointAssets(); // 👈 REFRESH
       }
 
-      _clearPointAssetMarking();
+      _resetPointAfterSave();
 
       return;
     }
@@ -4360,7 +4762,7 @@ class WelcomescreenState extends State<Welcomescreen> {
       return;
     }
 
-    if (asset == "Transformer") {
+    if (asset == "Transformer" || asset == "Transformer/ RMU") {
       await _submitTransformerDirectly(location);
       return;
     }
@@ -4406,6 +4808,30 @@ class WelcomescreenState extends State<Welcomescreen> {
 
       _parkingAreaPolygonPoints.clear();
       _parkingAreaPolygonPreview = null;
+
+      _greenMedianPolygonPoints.clear();
+      _greenMedianPolygonPreview = null;
+    });
+  }
+
+  void _resetPointAfterSave() {
+    if (!mounted) return;
+
+    setState(() {
+      _selectedPointLocation = null;
+
+      _trafficSafetyLinePoints.clear();
+
+      _trafficSafetyLinePreview = null;
+
+      _pavementDistressPolygonPoints.clear();
+      _pavementDistressPolygonPreview = null;
+
+      _parkingAreaPolygonPoints.clear();
+      _parkingAreaPolygonPreview = null;
+
+      _greenMedianPolygonPoints.clear();
+      _greenMedianPolygonPreview = null;
     });
   }
 
@@ -4446,20 +4872,19 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final Map<String, dynamic> decoded = jsonDecode(response.body);
         if (decoded['status'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Public Toilet saved successfully!")));
-          if (!mounted) return;
-        _clearPointAssetMarking();
+          AppSnackBar.showSuccess(context, "Public Toilet saved successfully!");
+          _resetPointAfterSave();
           loadAllPointAssets(); // 👈 REFRESH
         } else {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: ${decoded['error']}")));
+          if (mounted) AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Public Toilet.");
         }
       } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to save. Status: ${response.statusCode}")));
+        if (mounted) AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Submission Error: $e")));
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
       }
     }
   }
@@ -4500,19 +4925,19 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final Map<String, dynamic> decoded = jsonDecode(response.body);
         if (decoded['status'] == true) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Street Light saved successfully!")));
-          _clearPointAssetMarking();
+          if (mounted) AppSnackBar.showSuccess(context, "Street Light saved successfully!");
+          _resetPointAfterSave();
           loadAllPointAssets(); // 👈 REFRESH
         } else {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: ${decoded['error']}")));
+          if (mounted) AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Street Light.");
         }
       } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to save. Status: ${response.statusCode}")));
+        if (mounted) AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Submission Error: $e")));
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
       }
     }
   }
@@ -4553,19 +4978,19 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final Map<String, dynamic> decoded = jsonDecode(response.body);
         if (decoded['status'] == true) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Telecom Box saved successfully!")));
-          _clearPointAssetMarking();
+          if (mounted) AppSnackBar.showSuccess(context, "Telecom Box saved successfully!");
+          _resetPointAfterSave();
           loadAllPointAssets(); // 👈 REFRESH
         } else {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: ${decoded['error']}")));
+          if (mounted) AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Telecom Box.");
         }
       } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to save. Status: ${response.statusCode}")));
+        if (mounted) AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Submission Error: $e")));
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
       }
     }
   }
@@ -4597,19 +5022,79 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (response.statusCode == 200) {
         final Map<String, dynamic> decoded = jsonDecode(response.body);
         if (decoded['status'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Transformer saved successfully!")));
-          _clearPointAssetMarking();
+          AppSnackBar.showSuccess(context, "Transformer saved successfully!");
+          _resetPointAfterSave();
           loadAllPointAssets(); // 👈 REFRESH
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: ${decoded['error']}")));
+          AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Transformer.");
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to save. Status: ${response.statusCode}")));
+        AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Submission Error: $e")));
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
+      }
+    }
+  }
+
+  Future<void> _submitGreenMedianDirectly(List<LatLng> points) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final username = prefs.getString('username') ?? 'mobile_unknown';
+      final nagarNigam = prefs.getString('city') ?? prefs.getString('nagarNigam') ?? '';
+
+      final url = Uri.parse('${AppConstants.baseURL}api/green-median/create');
+      debugPrint("📡 SUBMITTING GREEN MEDIAN TO: $url");
+
+      final request = http.MultipartRequest('POST', url);
+      request.headers['X-User'] = username;
+
+      request.fields['nagarNigam'] = nagarNigam;
+      if (widget.zoneName != null) {
+        request.fields['zoneName'] = widget.zoneName!;
+      }
+      request.fields['wardNo'] = widget.wardNo;
+      request.fields['wardName'] = widget.wardName;
+      request.fields['geometryType'] = "Polygon";
+      request.fields['createdBy'] = username;
+
+      // Encode coordinates
+      final coordinates = points.map((p) => {
+        'latitude': p.latitude,
+        'longitude': p.longitude,
+      }).toList();
+      request.fields['coordinates'] = jsonEncode(coordinates);
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (!mounted) return;
+      Navigator.pop(context); // close loader
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> decoded = jsonDecode(response.body);
+        if (decoded['status'] == true) {
+          AppSnackBar.showSuccess(context, "Green Median saved successfully!");
+          _resetPointAfterSave();
+          loadAllPointAssets(); // 👈 REFRESH
+        } else {
+          AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Green Median.");
+        }
+      } else {
+        AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // close loader
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
       }
     }
   }
@@ -4657,27 +5142,19 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (response.statusCode == 200) {
         final Map<String, dynamic> decoded = jsonDecode(response.body);
         if (decoded['status'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Parking Area saved successfully!")),
-          );
-          _clearPointAssetMarking();
+          AppSnackBar.showSuccess(context, "Parking Area saved successfully!");
+          _resetPointAfterSave();
           loadAllPointAssets(); // 👈 REFRESH
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Error: ${decoded['error']}")),
-          );
+          AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Parking Area.");
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Failed to save. Status: ${response.statusCode}")),
-        );
+        AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context); // close loader
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Submission Error: $e")),
-        );
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
       }
     }
   }
@@ -4725,28 +5202,20 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (response.statusCode == 200) {
         final Map<String, dynamic> decoded = jsonDecode(response.body);
         if (decoded['status'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Bus Stop saved successfully!")),
-          );
-          _clearPointAssetMarking();
+          AppSnackBar.showSuccess(context, "Bus Stop saved successfully!");
+          _resetPointAfterSave();
           loadAllPointAssets(); // 👈 REFRESH
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Error: ${decoded['error']}")),
-          );
+          AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Bus Stop.");
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Failed to save. Status: ${response.statusCode}")),
-        );
+        AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       debugPrint("❌ ERROR: $e");
       if (mounted) {
         Navigator.pop(context); // close loader
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Submission Error: $e")),
-        );
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
       }
     }
   }
@@ -4796,43 +5265,35 @@ class WelcomescreenState extends State<Welcomescreen> {
       if (response.statusCode == 200) {
         final Map<String, dynamic> decoded = jsonDecode(response.body);
         if (decoded['status'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Manhole saved successfully!")),
-          );
-          _clearPointAssetMarking();
+          AppSnackBar.showSuccess(context, "Manhole saved successfully!");
+          _resetPointAfterSave();
           loadAllPointAssets(); // 👈 REFRESH
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Error: ${decoded['error']}")),
-          );
+          AppSnackBar.showError(context, decoded['error']?.toString() ?? "Failed to save Manhole.");
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Failed to save. Status: ${response.statusCode}")),
-        );
+        AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       debugPrint("❌ ERROR: $e");
       if (mounted) {
         Navigator.pop(context); // close loader
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Submission Error: $e")),
-        );
+        AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
       }
     }
   }
 
-  Future<void> loadAllPointAssets() async {
-    // final String ward = _selectedWard ?? widget.wardNo;
+  Future<void> loadAllPointAssets({bool force = false}) async {
+    if (_isFetchingPointAssets && !force) return;
+    _isFetchingPointAssets = true;
 
-    final String ward =
-    widget.wardNo.trim();
+    final String ward = widget.wardNo.trim();
+    if (ward.isEmpty) {
+      _isFetchingPointAssets = false;
+      return;
+    }
 
-    if (ward.isEmpty) return;
-
-
-    final String zone =
-    (widget.zoneName ?? '').trim();
+    final String zone = (widget.zoneName ?? '').trim();
     try {
       debugPrint("📡 Fetching all point assets for Ward: $ward, Zone: $zone...");
       
@@ -4854,6 +5315,7 @@ class WelcomescreenState extends State<Welcomescreen> {
         pointAssetService.fetchAssets("Manhole", zone, ward),
         pointAssetService.fetchAssets("Bus Stop", zone, ward),
         pointAssetService.fetchAssets("Parking Area", zone, ward),
+        pointAssetService.fetchAssets("Green Median", zone, ward),
         pointAssetService.fetchAssets("Road Signage", zone, ward),
         pointAssetService.fetchAssets("Traffic Safety Features Layer", zone, ward),
         pointAssetService.fetchAssets("Pavement Distress", zone, ward),
@@ -4867,22 +5329,27 @@ class WelcomescreenState extends State<Welcomescreen> {
 
       _processAssetMarkers(results[0], "manhole", icons[0], (m) => _manholeMarkers = m);
       _processAssetMarkers(results[1], "bus_stop", icons[1], (m) => _busStopMarkers = m);
-      _processParkingAreas(results[2]);
-      _processAssetMarkers(results[3], "road_signage", icons[2], (m) => _roadSignageMarkers = m);
-      _processTrafficSafety(results[4], icons[3]);
-      _processPavementDistress(results[5], icons[8]);
-      _processAssetMarkers(results[6], "toilet", icons[4], (m) => _toiletMarkers = m);
-      _processAssetMarkers(results[7], "electric_pole", icons[5], (m) => _electricPoleMarkers = m);
-      _processAssetMarkers(results[8], "transformer", icons[3], (m) => _transformerMarkers = m);
-      _processAssetMarkers(results[9], "street_light", icons[6], (m) => _streetLightMarkers = m);
-      _processAssetMarkers(results[10], "telecom_box", icons[7], (m) => _telecomBoxMarkers = m);
+      await _processParkingAreas(results[2]);
+      await _processGreenMedians(results[3]);
+      _processAssetMarkers(results[4], "road_signage", icons[2], (m) => _roadSignageMarkers = m);
+      _processTrafficSafety(results[5], icons[3]);
+      _processPavementDistress(results[6], icons[8]);
+      _processAssetMarkers(results[7], "toilet", icons[4], (m) => _toiletMarkers = m);
+      _processAssetMarkers(results[8], "electric_pole", icons[5], (m) => _electricPoleMarkers = m);
+      _processAssetMarkers(results[9], "transformer", icons[3], (m) => _transformerMarkers = m);
+      _processAssetMarkers(results[10], "street_light", icons[6], (m) => _streetLightMarkers = m);
+      _processAssetMarkers(results[11], "telecom_box", icons[7], (m) => _telecomBoxMarkers = m);
 
-      debugPrint("📊 Assets Count -> MH: ${_manholeMarkers.length}, BS: ${_busStopMarkers.length}, PK: ${_parkingAreaPolygons.length}, RS: ${_roadSignageMarkers.length}, TS: ${_trafficSafetyMarkers.length}, PD: ${_pavementDistressMarkers.length}, TL: ${_toiletMarkers.length}, EP: ${_electricPoleMarkers.length}, TR: ${_transformerMarkers.length}, SL: ${_streetLightMarkers.length}, TB: ${_telecomBoxMarkers.length}");
+      _updateCachedPointAssetMarkers(); // 👈 Pre-compute merged set ONCE instead of inside build()
+
+      debugPrint("📊 Assets Count -> MH: ${_manholeMarkers.length}, BS: ${_busStopMarkers.length}, PK: ${_parkingAreaPolygons.length}, GM: ${_greenMedianPolygons.length}, RS: ${_roadSignageMarkers.length}, TS: ${_trafficSafetyMarkers.length}, PD: ${_pavementDistressMarkers.length}, TL: ${_toiletMarkers.length}, EP: ${_electricPoleMarkers.length}, TR: ${_transformerMarkers.length}, SL: ${_streetLightMarkers.length}, TB: ${_telecomBoxMarkers.length}");
 
       if (mounted) setState(() {});
       debugPrint("✅ All point assets loaded");
     } catch (e) {
       debugPrint("❌ Error loading point assets: $e");
+    } finally {
+      _isFetchingPointAssets = false;
     }
   }
 
@@ -4933,7 +5400,7 @@ class WelcomescreenState extends State<Welcomescreen> {
   }
 
   // Pre-cached small circle icons to keep the map clean
-  final Map<int, BitmapDescriptor> _customIconCache = {};
+  static final Map<int, BitmapDescriptor> _customIconCache = {};
 
   Future<BitmapDescriptor> _getSmallCircleIcon(Color color) async {
     final int colorVal = color.value;
@@ -4943,7 +5410,7 @@ class WelcomescreenState extends State<Welcomescreen> {
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(recorder);
     if (!mounted) return BitmapDescriptor.defaultMarker;
-    final double devicePixelRatio = View.of(context).devicePixelRatio;
+    final double devicePixelRatio = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
 
     final Paint paint = Paint()..color = color;
     final Paint borderPaint = Paint()
@@ -4961,69 +5428,200 @@ class WelcomescreenState extends State<Welcomescreen> {
     return icon;
   }
 
-  void _processParkingAreas(List<Map<String, dynamic>> data) {
+    Future<void> _processParkingAreas(List<Map<String, dynamic>> data) async {
     debugPrint("🚜 Processing ${data.length} parking area records");
-    _parkingAreaPolygons = data.map((item) {
-      // Look for coordinates in common PostGIS/GeoJSON or custom keys
+    
+    // We will accumulate parsed polygons
+    final Set<Polygon> polys = {};
+
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i];
+      // Yield CPU periodically
+      if (i % 20 == 0) await Future.delayed(Duration.zero);
+
       final dynamic geoJson = item['geojson'] ?? item['geom'] ?? item;
       
       try {
-        Map<String, dynamic> parsedGeo;
+        Map<String, dynamic>? parsedGeo;
         if (geoJson is String) {
-          parsedGeo = jsonDecode(geoJson);
+          final trimmed = geoJson.trim();
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            parsedGeo = jsonDecode(trimmed);
+          } else if (trimmed.toUpperCase().contains('POLYGON') || trimmed.toUpperCase().contains('LINESTRING')) {
+             parsedGeo = _fallbackWktToGeoJson(trimmed);
+          }
         } else if (geoJson is Map) {
           parsedGeo = Map<String, dynamic>.from(geoJson);
-        } else {
-          return null;
-        }
+        } 
+        if (parsedGeo == null) continue;
 
         final String type = parsedGeo['type'] ?? '';
         final dynamic coordinates = parsedGeo['coordinates'];
 
         if (coordinates == null || coordinates is! List) {
-          debugPrint("⚠️ Parking item has no valid coordinates: $parsedGeo");
-          return null;
+          continue;
         }
 
         List<LatLng> points = [];
 
         if (type == 'Polygon' && coordinates.isNotEmpty) {
-          // GeoJSON Polygon: [[[lng, lat], [lng, lat], ...]]
           final List ring = coordinates[0];
           points = ring.map<LatLng>((c) {
             return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
           }).toList();
         } else if (type == 'MultiPolygon' && coordinates.isNotEmpty) {
-          // GeoJSON MultiPolygon: [[[[lng, lat], ...]]]
           final List firstPolygon = coordinates[0];
           final List ring = firstPolygon[0];
           points = ring.map<LatLng>((c) {
             return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
           }).toList();
+        } else if (type == 'LineString' && coordinates.isNotEmpty) {
+          points = (coordinates as List).map<LatLng>((c) {
+            return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
+          }).toList();
+        } else if (type == 'MultiLineString' && coordinates.isNotEmpty) {
+          final List line = coordinates[0];
+          points = line.map<LatLng>((c) {
+            return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
+          }).toList();
         }
 
-        if (points.length < 3) {
-          debugPrint("⚠️ Parking polygon has fewer than 3 points: ${points.length}");
-          return null;
+        if (points.length >= 3) {
+          polys.add(
+            Polygon(
+              polygonId: PolygonId("parking_persistent_${item['id'] ?? item['gid'] ?? i}"),
+              points: points,
+              fillColor: Colors.blueAccent.withOpacity(0.5),
+              strokeColor: Colors.blueAccent,
+              strokeWidth: 2,
+              zIndex: 10,
+            )
+          );
         }
-
-        debugPrint("✅ Parking polygon parsed with ${points.length} points");
-
-        return Polygon(
-          polygonId: PolygonId("parking_persistent_${item['id'] ?? item['gid'] ?? data.indexOf(item)}"),
-          points: points,
-          fillColor: Colors.blueAccent.withValues(alpha: 0.5),
-          strokeColor: Colors.blueAccent,
-          strokeWidth: 2,
-          zIndex: 10, // Bring to front
-        );
       } catch (e) {
         debugPrint("❌ Error parsing parking area: $e");
-        return null;
       }
-    }).whereType<Polygon>().toSet();
+    }
     
+    if (mounted) {
+      setState(() {
+        _parkingAreaPolygons = polys;
+      });
+    }
     debugPrint("🗺️ Final persistent parking polygons count: ${_parkingAreaPolygons.length}");
+  }
+
+  Map<String, dynamic>? _fallbackWktToGeoJson(String wkt) {
+    try {
+      final uppercaseWkt = wkt.toUpperCase().trim();
+      final start = uppercaseWkt.indexOf('(');
+      final end = uppercaseWkt.lastIndexOf(')');
+      if (start != -1 && end != -1 && end > start) {
+        String content = uppercaseWkt.substring(start + 1, end).trim();
+        content = content.replaceAll('(', '').replaceAll(')', '');
+        final pointPairs = content.split(',');
+        final List<List<double>> coords = [];
+        for (var pair in pointPairs) {
+          final parts = pair.trim().split(RegExp(r'\s+'));
+          if (parts.length >= 2) {
+            final double? lng = double.tryParse(parts[0]);
+            final double? lat = double.tryParse(parts[1]);
+            if (lng != null && lat != null) {
+              coords.add([lng, lat]);
+            }
+          }
+        }
+        if (uppercaseWkt.startsWith("POLYGON")) {
+           return {"type": "Polygon", "coordinates": [coords]};
+        } else if (uppercaseWkt.startsWith("LINESTRING")) {
+           return {"type": "LineString", "coordinates": coords};
+        }
+      }
+    } catch (e) {
+      debugPrint("Error parsing fallback WKT: $e");
+    }
+    return null;
+  }
+
+  Future<void> _processGreenMedians(List<Map<String, dynamic>> data) async {
+    debugPrint("🌿 Processing ${data.length} green median records");
+    
+    final Set<Polygon> polys = {};
+
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i];
+      if (i % 20 == 0) await Future.delayed(Duration.zero);
+
+      final dynamic geoJson = item['geojson'] ?? item['geom'] ?? item;
+
+      try {
+        Map<String, dynamic>? parsedGeo;
+        if (geoJson is String) {
+          final trimmed = geoJson.trim();
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            parsedGeo = jsonDecode(trimmed);
+          } else if (trimmed.toUpperCase().contains('POLYGON') || trimmed.toUpperCase().contains('LINESTRING')) {
+             parsedGeo = _fallbackWktToGeoJson(trimmed);
+          }
+        } else if (geoJson is Map) {
+          parsedGeo = Map<String, dynamic>.from(geoJson);
+        }
+        
+        if (parsedGeo == null) continue;
+
+        final String type = parsedGeo['type'] ?? '';
+        final dynamic coordinates = parsedGeo['coordinates'];
+
+        if (coordinates == null || coordinates is! List) continue;
+
+        List<LatLng> points = [];
+
+        if (type == 'Polygon' && coordinates.isNotEmpty) {
+          final List ring = coordinates[0];
+          points = ring.map<LatLng>((c) {
+            return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
+          }).toList();
+        } else if (type == 'MultiPolygon' && coordinates.isNotEmpty) {
+          final List firstPolygon = coordinates[0];
+          final List ring = firstPolygon[0];
+          points = ring.map<LatLng>((c) {
+            return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
+          }).toList();
+        } else if (type == 'LineString' && coordinates.isNotEmpty) {
+          points = (coordinates as List).map<LatLng>((c) {
+            return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
+          }).toList();
+        } else if (type == 'MultiLineString' && coordinates.isNotEmpty) {
+          final List line = coordinates[0];
+          points = line.map<LatLng>((c) {
+            return LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble());
+          }).toList();
+        }
+
+        if (points.length >= 3) {
+          polys.add(
+            Polygon(
+              polygonId: PolygonId("green_median_persistent_${item['id'] ?? item['gid'] ?? i}"),
+              points: points,
+              fillColor: Colors.green.withOpacity(0.5),
+              strokeColor: Colors.green.shade700,
+              strokeWidth: 2,
+              zIndex: 10,
+            )
+          );
+        }
+      } catch (e) {
+        debugPrint("❌ Error parsing green median: $e");
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _greenMedianPolygons = polys;
+      });
+    }
+
+    debugPrint("🗺️ Final persistent green median polygons count: ${_greenMedianPolygons.length}");
   }
 
   void _processTrafficSafety(List<Map<String, dynamic>> data, BitmapDescriptor icon) {
@@ -5157,7 +5755,7 @@ class WelcomescreenState extends State<Welcomescreen> {
               polygons.add(Polygon(
                 polygonId: PolygonId("pd_poly_${item['id'] ?? item['gid'] ?? item['road_id']}"),
                 points: points,
-                fillColor: Colors.orangeAccent.withValues(alpha: 0.3),
+                fillColor: Colors.orangeAccent.withOpacity(0.3),
                 strokeColor: Colors.orangeAccent,
                 strokeWidth: 3,
                 zIndex: 4,
@@ -5171,6 +5769,26 @@ class WelcomescreenState extends State<Welcomescreen> {
     }
     _pavementDistressMarkers = markers;
     _pavementDistressPolygons = polygons;
+  }
+
+  Future<void> _closeAllMarkerInfoWindows() async {
+    if (!_controller.isCompleted) return;
+
+    final mapController = await _controller.future;
+    if (!mounted) return;
+
+    final markerIds = <MarkerId>{
+      ..._markers.map((m) => m.markerId),
+      ..._cachedPointAssetMarkers.map((m) => m.markerId),
+    };
+
+    for (final markerId in markerIds) {
+      try {
+        await mapController.hideMarkerInfoWindow(markerId);
+      } catch (_) {
+        // Marker may no longer exist on the map.
+      }
+    }
   }
 }
 
@@ -5205,6 +5823,72 @@ List<LatLng> decimatePoints(List<LatLng> pts, double zoom) {
   if (out.last != pts.last) out.add(pts.last);
   return out;
 }
+
+class ParsedRoadGeometry {
+  final List<List<LatLng>> segments;
+  final double minLat;
+  final double minLng;
+  final double maxLat;
+  final double maxLng;
+
+  ParsedRoadGeometry({
+    required this.segments,
+    required this.minLat,
+    required this.minLng,
+    required this.maxLat,
+    required this.maxLng,
+  });
+
+  bool isInBounds(LatLngBounds? bounds) {
+    if (bounds == null || segments.isEmpty) return true;
+
+    // Strict 2% edge buffer
+    final double latPad = (bounds.northeast.latitude - bounds.southwest.latitude).abs() * 0.02;
+    final double lngPad = (bounds.northeast.longitude - bounds.southwest.longitude).abs() * 0.02;
+
+    return !(maxLat < bounds.southwest.latitude - latPad ||
+             minLat > bounds.northeast.latitude + latPad ||
+             maxLng < bounds.southwest.longitude - lngPad ||
+             minLng > bounds.northeast.longitude + lngPad);
+  }
+}
+
+ParsedRoadGeometry parseWKTWithBBox(String wkt) {
+  final segments = parseWKTToSegments(wkt);
+  if (segments.isEmpty) {
+    return ParsedRoadGeometry(segments: [], minLat: 0, minLng: 0, maxLat: 0, maxLng: 0);
+  }
+
+  double minLat = 90.0, maxLat = -90.0;
+  double minLng = 180.0, maxLng = -180.0;
+
+  for (final seg in segments) {
+    for (final p in seg) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+  }
+
+  return ParsedRoadGeometry(
+    segments: segments,
+    minLat: minLat,
+    minLng: minLng,
+    maxLat: maxLat,
+    maxLng: maxLng,
+  );
+}
+
+List<ParsedRoadGeometry> parseWKTBatchWithBBox(List<String> wktList) {
+  return wktList.map((wkt) => parseWKTWithBBox(wkt)).toList();
+}
+
+List<List<List<LatLng>>> parseWKTBatch(List<String> wktList) {
+  return wktList.map((wkt) => parseWKTToSegments(wkt)).toList();
+}
+
+
 
 List<List<LatLng>> parseWKTToSegments(String wkt) {
   wkt = wkt.trim();

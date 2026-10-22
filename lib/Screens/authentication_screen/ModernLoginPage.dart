@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../constants/appconstants.dart';
+import '../../utils/app_error_utils.dart';
+import '../../utils/app_snackbar.dart';
 import '../../utils/device_utils.dart';
 import '../basic_screen/OnboardingScreen.dart';
 
@@ -118,21 +120,24 @@ class _ModernLoginPageState extends State<ModernLoginPage> {
       fillColor: Colors.white,
     );
   }
-
-
-
   Future<void> _loginUser() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
-    final username = _usernameController.text.trim();
-    final password = _passwordController.text.trim();
+    final String username = _usernameController.text.trim();
+
+    // Do not trim or hash the password.
+    final String password = _passwordController.text;
 
     try {
-      final url = Uri.parse(
+      final Uri url = Uri.parse(
         '${AppConstants.baseURL}api/roads_mobile/login_mobile',
       );
+
+      debugPrint("LOGIN URL: $url");
+      debugPrint("LOGIN USERNAME: $username");
+      debugPrint("PASSWORD LENGTH: ${password.length}");
 
       final response = await http.post(
         url,
@@ -147,47 +152,54 @@ class _ModernLoginPageState extends State<ModernLoginPage> {
         const Duration(seconds: 30),
       );
 
+      debugPrint("LOGIN STATUS: ${response.statusCode}");
+      debugPrint("LOGIN RESPONSE: ${response.body}");
+
       if (!mounted) return;
 
-      setState(() => _isLoading = false);
-
       if (response.statusCode == 200) {
-        final prefs = await SharedPreferences.getInstance();
 
-        final data = jsonDecode(response.body);
+        final Map<String, dynamic> data =
+        jsonDecode(response.body) as Map<String, dynamic>;
 
-        // Save login status
-        await prefs.setBool('isLoggedIn', true);
+        if (data['status'] != true) {
+          throw Exception("Login was not successful");
+        }
 
-        // Save username
-        await prefs.setString(
-          'username',
-          username,
+        final String cityValue = [
+          data['city'],
+          data['nagarNigam'],
+          data['nagar_nigam'],
+          data['schema'],
+        ]
+            .map((value) => value?.toString().trim() ?? '')
+            .firstWhere(
+              (value) => value.isNotEmpty,
+          orElse: () => '',
         );
 
-        // Get city from login response
-        final cityValue =
-        data['city']?.toString().trim().isNotEmpty == true
-            ? data['city'].toString().trim()
-            : data['nagarNigam']?.toString().trim().isNotEmpty == true
-            ? data['nagarNigam'].toString().trim()
-            : data['nagar_nigam']?.toString().trim().isNotEmpty == true
-            ? data['nagar_nigam'].toString().trim()
-            : data['schema']?.toString().trim().isNotEmpty == true
-            ? data['schema'].toString().trim()
-            : '';
-
         if (cityValue.isEmpty) {
-          throw Exception(
-            "City not found in login response",
+          throw Exception("City not found in login response");
+        }
+
+        final prefs = await SharedPreferences.getInstance();
+
+        // Store valid user details.
+        await prefs.setString('username', username);
+        await prefs.setString('city', cityValue);
+
+        if (data['userId'] != null) {
+          await prefs.setString(
+            'userId',
+            data['userId'].toString(),
           );
         }
 
-        // Save city
-        await prefs.setString(
-          'city',
-          cityValue,
-        );
+        // Mark logged in only after required data is saved.
+        await prefs.setBool('isLoggedIn', true);
+
+        debugPrint("LOGIN SUCCESS");
+        debugPrint("NAGAR NIGAM: $cityValue");
 
         if (!mounted) return;
 
@@ -197,35 +209,157 @@ class _ModernLoginPageState extends State<ModernLoginPage> {
             builder: (context) => OnboardingScreen(),
           ),
         );
+
       } else if (response.statusCode == 401) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Invalid credentials'),
-          ),
-        );
+
+        String message = "Invalid username or password";
+
+        try {
+          final data = jsonDecode(response.body);
+
+          if (data is Map && data['message'] != null) {
+            message = data['message'].toString();
+          }
+        } catch (_) {
+          // Keep the default error message.
+        }
+
+        AppSnackBar.showError(context, message);
+
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Server error: ${response.statusCode}',
-            ),
-          ),
+
+        AppSnackBar.showError(
+          context,
+          AppErrorUtils.getFriendlyErrorMessage(response.statusCode),
         );
       }
+
     } catch (e) {
+
+      debugPrint("LOGIN ERROR: $e");
+
       if (!mounted) return;
 
-      setState(() => _isLoading = false);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Connection failed: $e',
-          ),
-        ),
+      AppSnackBar.showError(
+        context,
+        AppErrorUtils.getFriendlyErrorMessage(null, e),
       );
+
+    } finally {
+
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
+
+
+
+  // Future<void> _loginUser() async {
+  //   if (!_formKey.currentState!.validate()) return;
+  //
+  //   setState(() => _isLoading = true);
+  //
+  //   final username = _usernameController.text.trim();
+  //   final password = _passwordController.text;
+  //
+  //   try {
+  //     final url = Uri.parse(
+  //       '${AppConstants.baseURL}api/roads_mobile/login_mobile',
+  //     );
+  //
+  //     final response = await http.post(
+  //       url,
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //       },
+  //       body: jsonEncode({
+  //         "username": username,
+  //         "password": password,
+  //       }),
+  //     ).timeout(
+  //       const Duration(seconds: 30),
+  //     );
+  //
+  //     if (!mounted) return;
+  //
+  //     setState(() => _isLoading = false);
+  //
+  //     if (response.statusCode == 200) {
+  //       final prefs = await SharedPreferences.getInstance();
+  //
+  //       final data = jsonDecode(response.body);
+  //
+  //       // Save login status
+  //       await prefs.setBool('isLoggedIn', true);
+  //
+  //       // Save username
+  //       await prefs.setString(
+  //         'username',
+  //         username,
+  //       );
+  //
+  //       // Get city from login response
+  //       final cityValue =
+  //       data['city']?.toString().trim().isNotEmpty == true
+  //           ? data['city'].toString().trim()
+  //           : data['nagarNigam']?.toString().trim().isNotEmpty == true
+  //           ? data['nagarNigam'].toString().trim()
+  //           : data['nagar_nigam']?.toString().trim().isNotEmpty == true
+  //           ? data['nagar_nigam'].toString().trim()
+  //           : data['schema']?.toString().trim().isNotEmpty == true
+  //           ? data['schema'].toString().trim()
+  //           : '';
+  //
+  //       if (cityValue.isEmpty) {
+  //         throw Exception(
+  //           "City not found in login response",
+  //         );
+  //       }
+  //
+  //       // Save city
+  //       await prefs.setString(
+  //         'city',
+  //         cityValue,
+  //       );
+  //
+  //       if (!mounted) return;
+  //
+  //       Navigator.pushReplacement(
+  //         context,
+  //         MaterialPageRoute(
+  //           builder: (context) => OnboardingScreen(),
+  //         ),
+  //       );
+  //     } else if (response.statusCode == 401) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         const SnackBar(
+  //           content: Text('Invalid credentials'),
+  //         ),
+  //       );
+  //     } else {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: Text(
+  //             'Server error: ${response.statusCode}',
+  //           ),
+  //         ),
+  //       );
+  //     }
+  //   } catch (e) {
+  //     if (!mounted) return;
+  //
+  //     setState(() => _isLoading = false);
+  //
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       SnackBar(
+  //         content: Text(
+  //           'Connection failed: $e',
+  //         ),
+  //       ),
+  //     );
+  //   }
+  // }
 
   @override
   void dispose() {

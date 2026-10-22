@@ -15,6 +15,7 @@ class NewRoadFormScreen extends StatefulWidget {
   final double? latitude;
   final double? longitude;
   final List<String> roadAgeCategory;
+  final String zoneNo;
   final String? zoneName;
   final String wardNo;
   final String wardName;
@@ -25,6 +26,7 @@ class NewRoadFormScreen extends StatefulWidget {
     required this.latitude,
     required this.longitude,
     required this.roadAgeCategory,
+    required this.zoneNo,
     required this.zoneName,
     required this.wardNo,
     required this.wardName,
@@ -188,14 +190,86 @@ class _NewRoadFormScreenState extends State<NewRoadFormScreen> {
     super.initState();
     mobLatitude = widget.latitude;
     mobLongitude = widget.longitude;
-    zoneNameController.text =
-        widget.zoneName ??
-        ""; // If zoneName is null, it will show an empty string
-    wardNoController.text = widget.wardNo; // Ward No
-    wardNameController.text = widget.wardName; // Ward Name
+
+    // final String rawZone = widget.zoneName?.trim() ?? "";
+    // zoneNameController.text = rawZone;
+    //
+    // if (rawZone.isNotEmpty) {
+    //   final match = RegExp(r'\d+').firstMatch(rawZone);
+    //   zoneNoController.text = match != null ? match.group(0)! : rawZone;
+    // } else {
+    //   zoneNoController.text = "";
+    // }
+
+    String computedZoneNo = widget.zoneNo.trim();
+    if (computedZoneNo.isNotEmpty) {
+      final match = RegExp(r'\d+').firstMatch(computedZoneNo);
+      if (match != null) {
+        computedZoneNo = match.group(0)!;
+      }
+    } else if (widget.zoneName != null && widget.zoneName!.isNotEmpty) {
+      final match = RegExp(r'\d+').firstMatch(widget.zoneName!);
+      if (match != null) {
+        computedZoneNo = match.group(0)!;
+      } else {
+        computedZoneNo = widget.zoneName!.trim();
+      }
+    }
+
+    zoneNoController.text = computedZoneNo;
+    zoneNameController.text = widget.zoneName?.trim() ?? "";
+
+    wardNoController.text = widget.wardNo;
+    wardNameController.text = widget.wardName;
+
+    debugPrint("NEW ROAD ZONE NO: ${widget.zoneNo}");
+    debugPrint("NEW ROAD ZONE NAME: ${widget.zoneName}");
+    debugPrint("NEW ROAD WARD NO: ${widget.wardNo}");
+    debugPrint("NEW ROAD WARD NAME: ${widget.wardName}");
 
     loadDropdowns();
     _handleLostData();
+
+    // ✅ Set default 'No' for all infra fields
+    infraFields = {
+      'footpath': 'No',
+      'pavement_distress': 'No',
+      'median': 'No',
+      'electric_p': 'No',
+      'trees': 'No',
+      'toilet': 'No',
+      'parking': 'No',
+      'signboard': 'No',
+      'other': 'No',
+      'manhole': 'No',
+      'transforme': 'No',
+      'rmu': 'No',
+      'streetlight': 'No',
+      'gov_office': 'No',
+      'edu_instit': 'No',
+      'bank_atm': 'No',
+      'hospital': 'No',
+      'stadium': 'No',
+      'reli_place': 'No',
+      'graveyard': 'No',
+      'transport': 'No',
+      'road_marking': 'No',
+    };
+    drain = 'No';
+    roadMarking = 'No';
+    markingAvailable = 'No';
+    footpathEncroachment = 'No';
+    footpathObstruction = 'No';
+    medianPaved = 'No';
+    medianGreenCover = 'No';
+    medianToBeGreened = 'No';
+    
+    // Safety check: ensure no nulls in infraFields
+    infraFields.forEach((key, value) {
+      if (value == null) {
+        infraFields[key] = 'No';
+      }
+    });
   }
 
   Future<void> _handleLostData() async {
@@ -794,10 +868,11 @@ class _NewRoadFormScreenState extends State<NewRoadFormScreen> {
             _field("Major Landmark", majorLandController),
 
             _sectionHeader("Zone / Ward Details"),
-            _field("Zone No", zoneNoController),
-            _field("Zone Name", zoneNameController),
-            _field("Ward No", wardNoController),
-            _field("Ward Name", wardNameController),
+
+            _readOnlyField("Zone No", zoneNoController),
+            _readOnlyField("Zone Name", zoneNameController),
+            _readOnlyField("Ward No", wardNoController),
+            _readOnlyField("Ward Name", wardNameController),
 
             _sectionHeader("Ownership"),
 
@@ -1084,6 +1159,57 @@ class _NewRoadFormScreenState extends State<NewRoadFormScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _readOnlyField(
+      String label,
+      TextEditingController controller,
+      ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextFormField(
+        controller: controller,
+        readOnly: true,
+        style: const TextStyle(
+          fontSize: 14,
+          color: Colors.black87,
+        ),
+        decoration: InputDecoration(
+          labelText: label.toUpperCase(),
+          floatingLabelBehavior: FloatingLabelBehavior.always,
+
+          filled: true,
+          fillColor: const Color(0xFFF0F0F0),
+
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 16,
+          ),
+
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4),
+            borderSide: const BorderSide(
+              color: Colors.grey,
+            ),
+          ),
+
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4),
+            borderSide: const BorderSide(
+              color: Colors.grey,
+            ),
+          ),
+
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(4),
+            borderSide: const BorderSide(
+              color: Colors.grey,
+              width: 1.2,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1755,6 +1881,7 @@ class _NewRoadFormScreenState extends State<NewRoadFormScreen> {
       "roadName": roadNameController.text,
 
       "zoneNo": zoneNoController.text,
+      "zone_no": zoneNoController.text,
       "zoneName": zoneNameController.text,
       "wardNo": wardNoController.text,
       "wardName": wardNameController.text,

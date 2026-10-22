@@ -6,6 +6,8 @@ import '../../RoadConditionScreen.dart';
 import '../../Welcomescreen.dart';
 import '../../constants/appconstants.dart';
 import '../../models/asset_system.dart';
+import '../../utils/app_error_utils.dart';
+import '../../utils/app_snackbar.dart';
 
 class PreviewReshapeRoadScreen extends StatefulWidget {
   final Map<String, dynamic> data;
@@ -334,17 +336,12 @@ class _PreviewReshapeRoadScreenState extends State<PreviewReshapeRoadScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => Welcomescreen(
-                          roadAgeCategory: widget.roadAgeCategory,
-                          zoneName: widget.zoneName,
-                          wardNo: widget.wardNo,
-                          wardName: widget.wardName,
-                        ),
-                      ),
-                    );
+                    // Close the success dialog
+                    Navigator.pop(context);
+                    // Close the preview screen
+                    Navigator.pop(context);
+                    // Return back to map
+                    Navigator.pop(context, true);
                   },
                   child: const Text(
                     "OK",
@@ -384,41 +381,14 @@ class _PreviewReshapeRoadScreenState extends State<PreviewReshapeRoadScreen> {
           },
         );
       } else {
-        showDialog(
-          context: context,
-          builder: (context) {
-            return AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.error, color: Colors.red, size: 30),
-                  SizedBox(width: 10),
-                  Text("Error"),
-                ],
-              ),
-              content: Text(
-                "Failed to reshape road.\n\nStatus: ${response.statusCode}\n${response.body}",
-                style: const TextStyle(fontSize: 16),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Close"),
-                ),
-              ],
-            );
-          },
-        );
+        AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       print("RESHAPE ERROR: $e");
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Reshape failed: $e"),
-        ),
-      );
+      AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
     } finally {
       if (mounted) {
         setState(() {

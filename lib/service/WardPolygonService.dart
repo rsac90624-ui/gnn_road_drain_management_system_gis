@@ -44,7 +44,7 @@ class WardPolygonService {
       headers: {
         'Accept': 'application/json',
       },
-    );
+    ).timeout(const Duration(seconds: 15));
 
     debugPrint("WARD BOUNDARY STATUS: ${response.statusCode}");
     debugPrint("WARD BOUNDARY BODY: ${response.body}");

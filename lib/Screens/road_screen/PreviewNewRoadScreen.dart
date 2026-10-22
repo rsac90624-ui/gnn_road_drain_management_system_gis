@@ -7,6 +7,8 @@ import '../../RoadConditionScreen.dart';
 import '../../Welcomescreen.dart';
 import '../../constants/appconstants.dart';
 import '../../models/asset_system.dart';
+import '../../utils/app_error_utils.dart';
+import '../../utils/app_snackbar.dart';
 
 class PreviewNewRoadScreen extends StatefulWidget {
   final Map<String, dynamic> data;
@@ -32,7 +34,10 @@ class _PreviewNewRoadScreenState extends State<PreviewNewRoadScreen> {
 
   static const Map<String, String> _fieldLabels = {
     'roadname': 'ROAD NAME',
+    'zoneno': 'ZONE NO',
+    'zone_no': 'ZONE NO',
     'zonename': 'ZONE NAME',
+    'wardno': 'WARD NO',
     'wardname': 'WARD NAME',
     'yoc': 'YEAR OF CONSTRUCTION',
     'major_land': 'MAJOR LANDMARK',
@@ -96,10 +101,6 @@ class _PreviewNewRoadScreenState extends State<PreviewNewRoadScreen> {
                 return key != "geomwkt" &&
                        key != "mob_latitu" &&
                        key != "mob_longit" &&
-                       key != "zoneno" &&
-                       key != "wardno" &&
-                       key != "zonename" &&
-                       key != "wardname" &&
                        key != "createdby" &&
                        key != "footpath_photos" &&
                        key != "median_photos" &&
@@ -350,18 +351,12 @@ class _PreviewNewRoadScreenState extends State<PreviewNewRoadScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            Welcomescreen(
-                              roadAgeCategory: widget.roadAgeCategory,
-                              zoneName: widget.zoneName,
-                              wardNo: widget.wardNo,
-                              wardName: widget.wardName,
-                            ),
-                      ),
-                    );
+                    // Close the success dialog
+                    Navigator.pop(context);
+                    // Close the preview screen
+                    Navigator.pop(context);
+                    // Close the form screen and return true back to map
+                    Navigator.pop(context, true);
                   },
                   child: const Text(
                     "OK",
@@ -401,42 +396,14 @@ class _PreviewNewRoadScreenState extends State<PreviewNewRoadScreen> {
           },
         );
       } else {
-        showDialog(
-          context: context,
-          builder: (context) {
-            return AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.error, color: Colors.red, size: 30),
-                  SizedBox(width: 10),
-                  Text("Error"),
-                ],
-              ),
-              content: Text(
-                "Failed to create road.\n\nStatus: ${response
-                    .statusCode}\n${response.body}",
-                style: const TextStyle(fontSize: 16),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Close"),
-                ),
-              ],
-            );
-          },
-        );
+        AppErrorUtils.showServerErrorDialog(context, response.statusCode, response.body);
       }
     } catch (e) {
       debugPrint("CREATE ROAD ERROR: $e");
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Create road failed: $e"),
-        ),
-      );
+      AppSnackBar.showError(context, AppErrorUtils.getFriendlyErrorMessage(null, e));
     } finally {
       if (mounted) {
         setState(() {

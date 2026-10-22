@@ -34,6 +34,7 @@ class DynamicLegend {
       buildLegendItem(Colors.blueAccent.shade700, "Confirmed Road"),
       buildLegendItem(Colors.cyanAccent.shade700, "Road Width >= 12m"),
       buildLegendItem(Colors.deepPurpleAccent, "Updated Road"),
+      buildLegendItem(Colors.black, "Road Not Exists"),
     ]);
 
     // Default legends when no priority selected
@@ -73,6 +74,7 @@ class DynamicLegend {
     legendItems.addAll([
       buildLegendItem(Colors.blue, "Manhole"),
       buildLegendItem(Colors.deepPurple, "Bus Stop"),
+      buildLegendItem(Colors.green, "Green Median"),
       buildLegendItem(Colors.blueAccent, "Parking Area"),
       buildLegendItem(Colors.amber, "Road Signage"),
       buildLegendItem(Colors.redAccent, "Traffic Safety"),

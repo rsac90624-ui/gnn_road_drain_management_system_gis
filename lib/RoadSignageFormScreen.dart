@@ -73,7 +73,6 @@ class _RoadSignageFormScreenState
   final List<String> signTypes = [
     'Speed Limit',
     'No Parking',
-    'Pedestrian Crossing',
     'School Ahead',
     'Hospital',
     'Advertisement Board'

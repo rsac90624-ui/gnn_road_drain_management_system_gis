@@ -20,8 +20,6 @@ class RoadUpdateScreen extends StatefulWidget {
   final List<String> ownershipList;
   final Map<String, dynamic>? initialFormData;
 
-
-
   const RoadUpdateScreen({
     super.key,
     required this.roadData,
@@ -33,7 +31,6 @@ class RoadUpdateScreen extends StatefulWidget {
     required this.wardName,
     required this.ownershipList,
     this.initialFormData,
-
   });
 
   @override
@@ -138,12 +135,15 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
   final TextEditingController footpathWidthController = TextEditingController();
   String? footpathSurfaceMaterial;
   String? footpathCondition;
-  final TextEditingController footpathPavedLengthController = TextEditingController();
-  final TextEditingController footpathGreenedLengthController = TextEditingController();
+  final TextEditingController footpathPavedLengthController =
+      TextEditingController();
+  final TextEditingController footpathGreenedLengthController =
+      TextEditingController();
   String? footpathEncroachment;
   String? footpathObstruction;
   final List<File> footpathPhotos = [];
-  final TextEditingController footpathRemarksController = TextEditingController();
+  final TextEditingController footpathRemarksController =
+      TextEditingController();
   final TextEditingController treesCountController = TextEditingController();
 
   List<String> ownershipApiList = [];
@@ -154,7 +154,12 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
   List<String> conditionApiList = [];
 
   String? selectedPavementCondition;
-  final List<String> pavementConditionOptions = ['Good', 'Fair', 'Poor', 'Very Poor'];
+  final List<String> pavementConditionOptions = [
+    'Good',
+    'Fair',
+    'Poor',
+    'Very Poor',
+  ];
 
   bool ownershipLoading = true;
   String? selectedCus;
@@ -245,9 +250,7 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     if (existingMedianTypes is List) {
       selectedMedianTypes.addAll(existingMedianTypes.map((e) => e.toString()));
     } else if (existingMedianTypes is String &&
-        existingMedianTypes
-            .trim()
-            .isNotEmpty) {
+        existingMedianTypes.trim().isNotEmpty) {
       selectedMedianTypes.addAll(
         existingMedianTypes
             .split(',')
@@ -277,8 +280,10 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     footpathWidthController.text = d['footpath_width']?.toString() ?? '';
     footpathSurfaceMaterial = d['footpath_surface_material']?.toString();
     footpathCondition = d['footpath_condition']?.toString();
-    footpathPavedLengthController.text = d['footpath_paved_length']?.toString() ?? '';
-    footpathGreenedLengthController.text = d['footpath_greened_length']?.toString() ?? '';
+    footpathPavedLengthController.text =
+        d['footpath_paved_length']?.toString() ?? '';
+    footpathGreenedLengthController.text =
+        d['footpath_greened_length']?.toString() ?? '';
     footpathEncroachment = d['footpath_encroachment']?.toString() ?? 'No';
     footpathObstruction = d['footpath_obstruction']?.toString() ?? 'No';
     footpathRemarksController.text = d['footpath_remarks']?.toString() ?? '';
@@ -300,10 +305,15 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       text: d['row_meter'] != null ? d['row_meter'].toString() : null,
     );
 
-    drain = d['drain'] ?? 'No';
-    roadMarking = d['road_marking']?.toString() ?? 'No';
+    drain = (d['drain']?.toString().toLowerCase() == 'yes') ? 'Yes' : 'No';
+    roadMarking = (d['road_marking']?.toString().toLowerCase() == 'yes')
+        ? 'Yes'
+        : 'No';
 
-    markingAvailable = d['marking_available']?.toString() ?? 'No';
+    markingAvailable =
+        (d['marking_available']?.toString().toLowerCase() == 'yes')
+        ? 'Yes'
+        : 'No';
 
     final existingMarkingTypes = d['marking_type'];
 
@@ -312,9 +322,7 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
         existingMarkingTypes.map((e) => e.toString()),
       );
     } else if (existingMarkingTypes is String &&
-        existingMarkingTypes
-            .trim()
-            .isNotEmpty) {
+        existingMarkingTypes.trim().isNotEmpty) {
       selectedMarkingTypes.addAll(
         existingMarkingTypes
             .split(',')
@@ -347,39 +355,46 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     };
 
     loadDropdowns();
+    String normalizeYesNo(dynamic val) {
+      if (val == null) return 'No';
+      String s = val.toString().trim().toLowerCase();
+      return s == 'yes' ? 'Yes' : 'No';
+    }
+
     // ✅ radio button data
     infraFields = {
-      'footpath': (d['footpath'] ?? d['foothpath'])?.toString() ?? 'No',
-      'pavement_distress': d['pavement_distress']?.toString() ?? 'No',
-      'median': d['median']?.toString() ?? 'No',
-      'electric_p': d['electric_p']?.toString() ?? 'No',
-      'trees': d['trees']?.toString() ?? 'No',
-      'toilet': (d['toilet'] ?? d['public_toilet'])?.toString() ?? 'No',
-      'rmu': d['rmu']?.toString() ?? 'No',
-      'streetlight': (d['streetlight'] ?? d['street__so'] ?? d['strt_slr_l'])?.toString() ?? 'No',
-      'gov_office': (d['gov_office'] ?? d['government'])?.toString() ?? 'No',
-      'edu_instit': (d['edu_instit'] ?? d['educationa'])?.toString() ?? 'No',
-      'bank_atm': d['bank_atm']?.toString() ?? 'No',
-      'hospital': d['hospital']?.toString() ?? 'No',
-      'stadium': d['stadium']?.toString() ?? 'No',
-      'parking': (d['parking'] ?? d['park'])?.toString() ?? 'No',
-      'reli_place': (d['reli_place'] ?? d['religious'])?.toString() ?? 'No',
-      'graveyard': d['graveyard']?.toString() ?? 'No',
-      'transport': d['transport']?.toString() ?? 'No',
-      'signboard': d['signboard']?.toString() ?? 'No',
-      'other': d['other']?.toString() ?? 'No',
-      'manhole': d['manhole']?.toString() ?? 'No',
-      'transforme': d['transforme']?.toString() ?? 'No',
-      'road_marking': d['road_marking']?.toString() ?? 'No',
+      'footpath': normalizeYesNo(d['footpath'] ?? d['foothpath']),
+      'pavement_distress': normalizeYesNo(d['pavement_distress']),
+      'median': normalizeYesNo(d['median']),
+      'electric_p': normalizeYesNo(d['electric_p']),
+      'trees': normalizeYesNo(d['trees']),
+      'toilet': normalizeYesNo(d['toilet'] ?? d['public_toilet']),
+      'rmu': normalizeYesNo(d['rmu']),
+      'streetlight': normalizeYesNo(
+        d['streetlight'] ?? d['street__so'] ?? d['strt_slr_l'],
+      ),
+      'gov_office': normalizeYesNo(d['gov_office'] ?? d['government']),
+      'edu_instit': normalizeYesNo(d['edu_instit'] ?? d['educationa']),
+      'bank_atm': normalizeYesNo(d['bank_atm']),
+      'hospital': normalizeYesNo(d['hospital']),
+      'stadium': normalizeYesNo(d['stadium']),
+      'parking': normalizeYesNo(d['parking'] ?? d['park']),
+      'reli_place': normalizeYesNo(d['reli_place'] ?? d['religious']),
+      'graveyard': normalizeYesNo(d['graveyard']),
+      'transport': normalizeYesNo(d['transport']),
+      'signboard': normalizeYesNo(d['signboard']),
+      'other': normalizeYesNo(d['other']),
+      'manhole': normalizeYesNo(d['manhole']),
+      'transforme': normalizeYesNo(d['transforme']),
+      'road_marking': normalizeYesNo(d['road_marking']),
     };
 
     treesCountController.text = d['trees_count']?.toString() ?? "";
     selectedPavementCondition = d['pavement_condition']?.toString();
 
-
     // =====================================================
-// RESTORE FORM AFTER RETURNING FROM MANHOLE MAP
-// =====================================================
+    // RESTORE FORM AFTER RETURNING FROM MANHOLE MAP
+    // =====================================================
     final savedForm = widget.initialFormData;
 
     if (savedForm != null) {
@@ -387,8 +402,7 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       roadNameController.text =
           savedForm['road_name']?.toString() ?? roadNameController.text;
 
-      yocController.text =
-          savedForm['yoc']?.toString() ?? yocController.text;
+      yocController.text = savedForm['yoc']?.toString() ?? yocController.text;
 
       majorLandController.text =
           savedForm['major_land']?.toString() ?? majorLandController.text;
@@ -424,8 +438,7 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       // Infrastructure Yes/No fields
       for (final key in infraFields.keys) {
         if (savedForm.containsKey(key)) {
-          infraFields[key] =
-              savedForm[key]?.toString();
+          infraFields[key] = savedForm[key]?.toString();
         }
       }
 
@@ -433,91 +446,84 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       // ROAD MARKING RESTORE
       // ============================
 
-      roadMarking =
-          savedForm['road_marking']?.toString() ?? roadMarking;
+      roadMarking = savedForm['road_marking']?.toString() ?? roadMarking;
 
       markingAvailable =
-          savedForm['marking_available']?.toString() ??
-              markingAvailable;
+          savedForm['marking_available']?.toString() ?? markingAvailable;
 
-      markingSide =
-          savedForm['marking_side']?.toString() ?? markingSide;
+      markingSide = savedForm['marking_side']?.toString() ?? markingSide;
 
       roadMarkingRemarkController.text =
           savedForm['road_marking_remark']?.toString() ??
-              roadMarkingRemarkController.text;
+          roadMarkingRemarkController.text;
 
-      final savedMarkingTypes =
-      savedForm['marking_type'];
+      final savedMarkingTypes = savedForm['marking_type'];
 
       if (savedMarkingTypes is List) {
         selectedMarkingTypes
           ..clear()
-          ..addAll(
-            savedMarkingTypes.map(
-                  (e) => e.toString(),
-            ),
-          );
+          ..addAll(savedMarkingTypes.map((e) => e.toString()));
       }
 
       // ============================
       // MEDIAN RESTORE
       // ============================
 
-      final savedMedianTypes =
-      savedForm['median_type'];
+      final savedMedianTypes = savedForm['median_type'];
 
       if (savedMedianTypes is List) {
         selectedMedianTypes
           ..clear()
-          ..addAll(
-            savedMedianTypes.map(
-                  (e) => e.toString(),
-            ),
-          );
+          ..addAll(savedMedianTypes.map((e) => e.toString()));
       }
 
-      medianWidthController.text =
-          savedForm['median_width']?.toString() ?? '';
+      medianWidthController.text = savedForm['median_width']?.toString() ?? '';
 
       medianLengthController.text =
           savedForm['median_length']?.toString() ?? '';
 
-      medianPaved =
-          savedForm['median_paved']?.toString() ??
-              medianPaved;
+      medianPaved = savedForm['median_paved']?.toString() ?? medianPaved;
 
       medianGreenCover =
-          savedForm['median_green_cover']?.toString() ??
-              medianGreenCover;
+          savedForm['median_green_cover']?.toString() ?? medianGreenCover;
 
       medianGreenedLengthController.text =
           savedForm['median_greened_length']?.toString() ?? '';
 
       medianToBeGreened =
-          savedForm['median_to_be_greened']?.toString() ??
-              medianToBeGreened;
+          savedForm['median_to_be_greened']?.toString() ?? medianToBeGreened;
 
       medianCondition =
-          savedForm['median_condition']?.toString() ??
-              medianCondition;
+          savedForm['median_condition']?.toString() ?? medianCondition;
 
       medianRemarkController.text =
           savedForm['median_remark']?.toString() ?? '';
 
       footpathSide = savedForm['footpath_side']?.toString() ?? footpathSide;
-      footpathWidthController.text = savedForm['footpath_width']?.toString() ?? '';
-      footpathSurfaceMaterial = savedForm['footpath_surface_material']?.toString() ?? footpathSurfaceMaterial;
-      footpathCondition = savedForm['footpath_condition']?.toString() ?? footpathCondition;
-      footpathPavedLengthController.text = savedForm['footpath_paved_length']?.toString() ?? '';
-      footpathGreenedLengthController.text = savedForm['footpath_greened_length']?.toString() ?? '';
-      footpathEncroachment = savedForm['footpath_encroachment']?.toString() ?? footpathEncroachment;
-      footpathObstruction = savedForm['footpath_obstruction']?.toString() ?? footpathObstruction;
-      footpathRemarksController.text = savedForm['footpath_remarks']?.toString() ?? '';
+      footpathWidthController.text =
+          savedForm['footpath_width']?.toString() ?? '';
+      footpathSurfaceMaterial =
+          savedForm['footpath_surface_material']?.toString() ??
+          footpathSurfaceMaterial;
+      footpathCondition =
+          savedForm['footpath_condition']?.toString() ?? footpathCondition;
+      footpathPavedLengthController.text =
+          savedForm['footpath_paved_length']?.toString() ?? '';
+      footpathGreenedLengthController.text =
+          savedForm['footpath_greened_length']?.toString() ?? '';
+      footpathEncroachment =
+          savedForm['footpath_encroachment']?.toString() ??
+          footpathEncroachment;
+      footpathObstruction =
+          savedForm['footpath_obstruction']?.toString() ?? footpathObstruction;
+      footpathRemarksController.text =
+          savedForm['footpath_remarks']?.toString() ?? '';
 
       final savedFootpathPhotos = savedForm['footpath_photos'];
       if (savedFootpathPhotos is List) {
-        footpathPhotos..clear()..addAll(savedFootpathPhotos.map((path) => File(path)));
+        footpathPhotos
+          ..clear()
+          ..addAll(savedFootpathPhotos.map((path) => File(path)));
       }
 
       // ============================
@@ -528,15 +534,12 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       // if (savedBusStops is List) {
       //   busStopPoints..clear()..addAll(savedBusStops.map((item) => Map<String, dynamic>.from(item as Map)));
       // }
-
     }
     textFields.forEach((key, value) {
       dynamicControllers[key] = TextEditingController(text: value ?? '');
     });
     _handleLostData();
   }
-
-
 
   Future<void> _handleLostData() async {
     final LostDataResponse response = await _imagePicker.retrieveLostData();
@@ -584,10 +587,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_picker_type', 'marking');
-      // final XFile? image = await _imagePicker.pickImage(
-      //   source: ImageSource.camera,
-      //   imageQuality: 80,
-      // );
 
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
@@ -595,11 +594,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
         maxWidth: 1600,
         maxHeight: 1600,
       );
-
-      // if (image == null) {
-      //   setState(() => _isCapturing = false);
-      //   return;
-      // }
 
       if (image == null) {
         await prefs.remove('last_picker_type');
@@ -609,7 +603,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
         }
         return;
       }
-
 
       await prefs.remove('last_picker_type');
 
@@ -633,9 +626,7 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     if (_isCapturing) return;
     if (medianPhotos.length >= 4) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Maximum 4 median photographs allowed."),
-        ),
+        const SnackBar(content: Text("Maximum 4 median photographs allowed.")),
       );
       return;
     }
@@ -644,22 +635,12 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_picker_type', 'median');
-      // final XFile? image = await _imagePicker.pickImage(
-      //   source: ImageSource.camera,
-      //   imageQuality: 80,
-      // );
-
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
         imageQuality: 75,
         maxWidth: 1600,
         maxHeight: 1600,
       );
-
-      // if (image == null) {
-      //   setState(() => _isCapturing = false);
-      //   return;
-      // }
 
       if (image == null) {
         await prefs.remove('last_picker_type');
@@ -691,7 +672,9 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     if (_isCapturing) return;
     if (footpathPhotos.length >= 4) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Maximum 4 footpath photographs allowed.")),
+        const SnackBar(
+          content: Text("Maximum 4 footpath photographs allowed."),
+        ),
       );
       return;
     }
@@ -700,23 +683,12 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_picker_type', 'footpath');
-      // final XFile? image = await _imagePicker.pickImage(
-      //   source: ImageSource.camera,
-      //   imageQuality: 80,
-      // );
-
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
         imageQuality: 75,
         maxWidth: 1600,
         maxHeight: 1600,
       );
-
-      // if (image == null) {
-      //   setState(() => _isCapturing = false);
-      //   return;
-      // }
-
       if (image == null) {
         await prefs.remove('last_picker_type');
 
@@ -734,12 +706,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
         footpathPhotos.add(File(image.path));
         _isCapturing = false;
       });
-
-      // if (!mounted) return;
-      // setState(() {
-      //   footpathPhotos.add(File(image.path));
-      //   _isCapturing = false;
-      // });
     } catch (e) {
       if (!mounted) return;
       setState(() => _isCapturing = false);
@@ -1033,16 +999,20 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
                             selectedMarkingTypes.clear();
                             markingSide = null;
                             roadMarkingRemarkController.clear();
-                            markingAvailable = null;
+                            // markingAvailable = null;
                             markingPhotos.clear();
                           }
                         }
                       });
                     }),
 
-                    if (key == 'pavement_distress' && infraFields['pavement_distress'] == 'Yes')
+                    if (key == 'pavement_distress' &&
+                        infraFields['pavement_distress'] == 'Yes')
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         child: DropdownButtonFormField<String>(
                           value: selectedPavementCondition,
                           decoration: InputDecoration(
@@ -1067,7 +1037,10 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
 
                     if (key == 'trees' && infraFields['trees'] == 'Yes')
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         child: TextField(
                           controller: treesCountController,
                           keyboardType: TextInputType.number,
@@ -1091,16 +1064,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
               }),
 
               const Divider(),
-              // Radio button for "Drain" selection
-              _buildRadioRow(
-                'drain',
-                drain,
-                yesNoOptions,
-                (val) => setState(() => drain = val),
-              ),
-
-              const Divider(),
-
               // ===============================
               // ROAD MARKINGS
               // ===============================
@@ -1174,24 +1137,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 12),
-
-                const SizedBox(height: 10),
-
-                // ===============================
-                // MARKING AVAILABLE
-                // ===============================
-                _buildRadioRow(
-                  'marking_available',
-                  markingAvailable,
-                  yesNoOptions,
-                  (val) {
-                    setState(() {
-                      markingAvailable = val;
-                    });
-                  },
-                ),
-
                 const SizedBox(height: 10),
 
                 // ===============================
@@ -1257,21 +1202,31 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
                 ],
 
                 ElevatedButton.icon(
-                  onPressed: (markingPhotos.length < 4 && !_isCapturing) ? _captureMarkingPhoto : null,
-                  icon: _isCapturing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.camera_alt),
-                  label: Text(_isCapturing ? "Opening Camera..." : "Add Photograph (${markingPhotos.length}/4)"),
+                  onPressed: (markingPhotos.length < 4 && !_isCapturing)
+                      ? _captureMarkingPhoto
+                      : null,
+                  icon: _isCapturing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.camera_alt),
+                  label: Text(
+                    _isCapturing
+                        ? "Opening Camera..."
+                        : "Add Photograph (${markingPhotos.length}/4)",
+                  ),
                 ),
-
-                // ElevatedButton.icon(
-                //   onPressed: _captureMarkingPhoto,
-                //   icon: const Icon(Icons.camera_alt),
-                //   label: Text(
-                //     markingPhoto == null
-                //         ? "Take Photograph"
-                //         : "Retake Photograph",
-                //   ),
-                // ),
               ],
+              const SizedBox(height: 8),
+              // Radio button for "Drain" selection
+              _buildRadioRow(
+                'drain',
+                drain,
+                yesNoOptions,
+                (val) => setState(() => drain = val),
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: remarksController, // Using the remarksController
@@ -1290,108 +1245,8 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.orange.shade700,
                 ),
-                // onPressed: () async {
-                //   final updatedData = {
-                //     'road_id': roadIdController.text,
-                //     'mob_latitu': mobLatitude,
-                //     'mob_longit': mobLongitude,
-                //     'road_name': roadNameController.text,
-                //     'category': textFields['category'] == 'Other'
-                //         ? categoryOtherController.text.trim()
-                //         : textFields['category'],
-                //     'condition': textFields['condition'],
-                //     'yoc':
-                //         int.tryParse(yocController.text) ??
-                //         0, // Ensure numeric value
-                //     'major_land': majorLandController.text,
-                //     // 'park_name': parkNameController.text,
-                //     // 'park_owner': parkOwnershipController.text,
-                //     'drain': drain,
-                //     ...infraFields,
-                //     'length_met':
-                //         double.tryParse(textFields['length_met'] ?? '') ?? 0.0,
-                //
-                //     'row_meter':
-                //         double.tryParse(textFields['row_meter'] ?? '') ?? 0.0,
-                //
-                //     'remark': remarksController.text.trim(),
-                //     'ownership': textFields['ownership'] == 'Other'
-                //         ? ownershipOtherController.text.trim()
-                //         : textFields['ownership'],
-                //     'material': textFields['material'] == 'Other'
-                //         ? materialOtherController.text.trim()
-                //         : textFields['material'],
-                //
-                //     'material_c': textFields['material_c'] == 'Other'
-                //         ? materialClassOtherController.text.trim()
-                //         : textFields['material_c'],
-                //     'cus':
-                //         (textFields['cus'] == 'Other' ||
-                //             textFields['cus'] == 'Others')
-                //         ? cusOtherController.text.trim()
-                //         : textFields['cus'],
-                //     'road_marking': roadMarking,
-                //     'marking_type': selectedMarkingTypes.toList(),
-                //     'marking_side': markingSide,
-                //     'road_marking_remark': roadMarkingRemarkController.text
-                //         .trim(),
-                //     'marking_available': markingAvailable,
-                //     'marking_photos': markingPhotos
-                //         .map((photo) => photo.path)
-                //         .toList(),
-                //     'median_photos': medianPhotos
-                //         .map((photo) => photo.path)
-                //         .toList(),
-                //     'median_type': selectedMedianTypes.toList(),
-                //
-                //     'median_width': double.tryParse(
-                //       medianWidthController.text.trim(),
-                //     ),
-                //
-                //     'median_length': double.tryParse(
-                //       medianLengthController.text.trim(),
-                //     ),
-                //
-                //     'median_paved': medianPaved,
-                //
-                //     'median_green_cover': medianGreenCover,
-                //
-                //     'median_greened_length': double.tryParse(
-                //       medianGreenedLengthController.text.trim(),
-                //     ),
-                //
-                //     'median_to_be_greened': medianToBeGreened,
-                //
-                //     'median_condition': medianCondition,
-                //
-                //     'median_remark': medianRemarkController.text.trim(),
-                //     'footpath_side': footpathSide,
-                //
-                //   };
-                //
-                //   // await _submitRoadUpdate(widget.roadData['road_id'], updatedData);
-                //   // if (context.mounted) Navigator.pop(context);
-                //
-                //   Navigator.push(
-                //     context,
-                //     MaterialPageRoute(
-                //       builder: (_) => PreviewRoadUpdateScreen(
-                //         roadId: widget.roadData['road_id'],
-                //         updatedData: updatedData,
-                //         roadAgeCategory: widget
-                //             .roadAgeCategory, // Pass the required parameters
-                //         zoneName: widget.zoneName,
-                //         wardNo: widget.wardNo,
-                //         wardName: widget.wardName,
-                //       ),
-                //     ),
-                //   );
-                // },
-
                 onPressed: () async {
-                  final updatedData =
-                  _buildCurrentRoadFormData();
-
+                  final updatedData = _buildCurrentRoadFormData();
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -1511,10 +1366,7 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
               border: OutlineInputBorder(),
             ),
             items: ['Left', 'Right', 'Both'].map((side) {
-              return DropdownMenuItem<String>(
-                value: side,
-                child: Text(side),
-              );
+              return DropdownMenuItem<String>(value: side, child: Text(side));
             }).toList(),
             onChanged: (value) {
               setState(() {
@@ -1629,9 +1481,21 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
             const SizedBox(height: 10),
           ],
           ElevatedButton.icon(
-            onPressed: (footpathPhotos.length < 4 && !_isCapturing) ? _captureFootpathPhoto : null,
-            icon: _isCapturing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.camera_alt),
-            label: Text(_isCapturing ? "Opening Camera..." : "Add Footpath Photograph (${footpathPhotos.length}/4)"),
+            onPressed: (footpathPhotos.length < 4 && !_isCapturing)
+                ? _captureFootpathPhoto
+                : null,
+            icon: _isCapturing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.camera_alt),
+            label: Text(
+              _isCapturing
+                  ? "Opening Camera..."
+                  : "Add Footpath Photograph (${footpathPhotos.length}/4)",
+            ),
           ),
           const SizedBox(height: 12),
           TextFormField(
@@ -1842,9 +1706,21 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
           ],
 
           ElevatedButton.icon(
-            onPressed: (medianPhotos.length < 4 && !_isCapturing) ? _captureMedianPhoto : null,
-            icon: _isCapturing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.camera_alt),
-            label: Text(_isCapturing ? "Opening Camera..." : "Add Median Photograph (${medianPhotos.length}/4)"),
+            onPressed: (medianPhotos.length < 4 && !_isCapturing)
+                ? _captureMedianPhoto
+                : null,
+            icon: _isCapturing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.camera_alt),
+            label: Text(
+              _isCapturing
+                  ? "Opening Camera..."
+                  : "Add Median Photograph (${medianPhotos.length}/4)",
+            ),
           ),
 
           // ElevatedButton.icon(
@@ -1990,13 +1866,12 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       'reli_place': infraFields['reli_place'],
       'religious': infraFields['reli_place'],
       'transforme': infraFields['transforme'],
-      'transformer': infraFields['transforme'],
+      // 'transformer': infraFields['transforme'],
       'transport': infraFields['transport'],
 
       ...infraFields,
       'trees_count': treesCountController.text.trim(),
       'pavement_condition': selectedPavementCondition,
-
 
       'length_met': textFields['length_met'],
       'row_meter': textFields['row_meter'],
@@ -2017,9 +1892,7 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
           ? materialClassOtherController.text.trim()
           : textFields['material_c'],
 
-      'cus':
-      (textFields['cus'] == 'Other' ||
-          textFields['cus'] == 'Others')
+      'cus': (textFields['cus'] == 'Other' || textFields['cus'] == 'Others')
           ? cusOtherController.text.trim()
           : textFields['cus'],
 
@@ -2027,53 +1900,44 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       'road_marking': roadMarking,
       'marking_type': selectedMarkingTypes.toList(),
       'marking_side': markingSide,
-      'road_marking_remark':
-      roadMarkingRemarkController.text.trim(),
+      'road_marking_remark': roadMarkingRemarkController.text.trim(),
       'marking_available': markingAvailable,
 
-      'marking_photos':
-      markingPhotos.map((photo) => photo.path).toList(),
+      'marking_photos': markingPhotos.map((photo) => photo.path).toList(),
 
       // MEDIAN
       'median_type': selectedMedianTypes.toList(),
 
-      'median_width':
-      double.tryParse(
-        medianWidthController.text.trim(),
-      ),
+      'median_width': double.tryParse(medianWidthController.text.trim()),
 
-      'median_length':
-      double.tryParse(
-        medianLengthController.text.trim(),
-      ),
+      'median_length': double.tryParse(medianLengthController.text.trim()),
 
       'median_paved': medianPaved,
 
       'median_green_cover': medianGreenCover,
 
-      'median_greened_length':
-      double.tryParse(
+      'median_greened_length': double.tryParse(
         medianGreenedLengthController.text.trim(),
       ),
 
-      'median_to_be_greened':
-      medianToBeGreened,
+      'median_to_be_greened': medianToBeGreened,
 
-      'median_condition':
-      medianCondition,
+      'median_condition': medianCondition,
 
-      'median_photos':
-      medianPhotos.map((photo) => photo.path).toList(),
+      'median_photos': medianPhotos.map((photo) => photo.path).toList(),
 
-      'median_remark':
-      medianRemarkController.text.trim(),
+      'median_remark': medianRemarkController.text.trim(),
 
       'footpath_side': footpathSide,
       'footpath_width': double.tryParse(footpathWidthController.text.trim()),
       'footpath_surface_material': footpathSurfaceMaterial,
       'footpath_condition': footpathCondition,
-      'footpath_paved_length': double.tryParse(footpathPavedLengthController.text.trim()),
-      'footpath_greened_length': double.tryParse(footpathGreenedLengthController.text.trim()),
+      'footpath_paved_length': double.tryParse(
+        footpathPavedLengthController.text.trim(),
+      ),
+      'footpath_greened_length': double.tryParse(
+        footpathGreenedLengthController.text.trim(),
+      ),
       'footpath_encroachment': footpathEncroachment,
       'footpath_obstruction': footpathObstruction,
       'footpath_remarks': footpathRemarksController.text.trim(),

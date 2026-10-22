@@ -42,7 +42,7 @@ class NewRoadService {
         headers: {
           'Accept': 'application/json',
         },
-      );
+      ).timeout(const Duration(seconds: 15));
 
       debugPrint("📡 NEW ROAD RAW RESPONSE: ${response.body}");
 

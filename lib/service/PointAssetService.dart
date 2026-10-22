@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,6 +23,9 @@ class PointAssetService {
       case "Bus Stop":
         endpoint = "api/bus-stop/list";
         break;
+      case "Green Median":
+        endpoint = "api/green-median/list";
+        break;
       case "Parking Area":
         endpoint = "api/parking/list";
         break;
@@ -41,6 +45,7 @@ class PointAssetService {
         endpoint = "api/electric-pole/list";
         break;
       case "Transformer":
+      case "Transformer/ RMU":
         endpoint = "api/transformer/list";
         break;
       case "Street Light":
@@ -67,11 +72,12 @@ class PointAssetService {
     debugPrint("📡 Fetching $assetType from: $url");
 
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 15));
       debugPrint("📡 $assetType Status: ${response.statusCode}");
 
       if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
+        // Run large JSON decode in background isolate to prevent ANR
+        final decoded = await compute(jsonDecode, response.body);
         
         if (decoded is Map && decoded['status'] == true) {
           final List<dynamic> geometriesRaw = decoded['geometries'] ?? [];
