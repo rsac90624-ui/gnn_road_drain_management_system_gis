@@ -253,7 +253,6 @@ class _RoadSignageFormScreenState
     try {
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 70,
       );
 
       if (image == null) {

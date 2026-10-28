@@ -31,9 +31,10 @@ void showDrainSuccessDialog(
             backgroundColor: Colors.orange.shade700,
           ),
           onPressed: () {
-            Navigator.pop(context); // 1️⃣ close dialog
-            Navigator.pop(context); // 2️⃣ close Preview
-            Navigator.pop(context, true); // 3️⃣ close Form → back to MAP
+            final nav = Navigator.of(context);
+            nav.pop(); // 1️⃣ close dialog
+            nav.pop(); // 2️⃣ close Preview
+            nav.pop(true); // 3️⃣ close Form → back to MAP
           },
           child: const Text(
             "OK",

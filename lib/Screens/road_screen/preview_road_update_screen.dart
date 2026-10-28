@@ -438,12 +438,13 @@ class _PreviewRoadUpdateScreenState extends State<PreviewRoadUpdateScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
+                    final nav = Navigator.of(context);
                     // Close the success dialog
-                    Navigator.pop(context);
+                    nav.pop();
                     // Close the preview screen
-                    Navigator.pop(context);
-                    // Close the form screen and return true to indicate success
-                    Navigator.pop(context, true);
+                    nav.pop();
+                    // Close the form screen and return success action map
+                    nav.pop({'action': 'success'});
                   },
                   child: const Text("OK", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),

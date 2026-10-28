@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as Math;
 import 'package:all_nagar_nigam_road_dir/utils/device_utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -662,7 +663,7 @@ class WelcomescreenState extends State<Welcomescreen> {
       debugPrint("📡 [NET] Status: ${response.statusCode}");
       if (response.statusCode != 200) return;
 
-      final List data = json.decode(response.body);
+      final List data = await compute(jsonDecode, response.body) as List;
       final int totalApiRoads = data.length;
 
       final int roadsWithId = data.where((road) {
@@ -1141,8 +1142,8 @@ class WelcomescreenState extends State<Welcomescreen> {
 
     if (result == true || 
         (result is Map && (result['action'] == 'success' || result['success'] == true))) {
-      // Refresh road data silently without zooming
-      await _fetchPolylineDataFromBounds(preventZoom: true);
+      // Force refresh road data silently without zooming
+      await _fetchPolylineDataFromBounds(force: true, preventZoom: true);
       return;
     }
 
@@ -3338,8 +3339,8 @@ class WelcomescreenState extends State<Welcomescreen> {
           _newRoadPoints.clear();
           _newRoadPreview = null;
         });
-        // Just reload the roads layer silently without changing camera
-        await _fetchPolylineDataFromBounds(preventZoom: true);
+        // Force reload the roads layer silently without changing camera
+        await _fetchPolylineDataFromBounds(force: true, preventZoom: true);
       }
     } else {
       _exitCreateRoadMode();
@@ -4135,7 +4136,7 @@ class WelcomescreenState extends State<Welcomescreen> {
       final response = await http.get(uri, headers: await _authHeaders());
 
       if (response.statusCode == 200) {
-        final List data = json.decode(response.body);
+        final List data = await compute(jsonDecode, response.body) as List;
 
         if (data.isEmpty) {
           _showNoMissingRoadsDialog();
@@ -4359,6 +4360,15 @@ class WelcomescreenState extends State<Welcomescreen> {
     );
   }
 
+  double _haversineDistance(double lat1, double lon1, double lat2, double lon2) {
+    const p = 0.017453292519943295;
+    final c = Math.cos;
+    final a = 0.5 -
+        c((lat2 - lat1) * p) / 2 +
+        c(lat1 * p) * c(lat2 * p) * (1 - c((lon2 - lon1) * p)) / 2;
+    return 12742000 * Math.asin(Math.sqrt(a));
+  }
+
   Future<LatLng> _snapToNearestRoad(LatLng tap, {double maxMeters = 30}) async {
     LatLng best = tap;
     double bestDist = maxMeters;
@@ -4379,6 +4389,9 @@ class WelcomescreenState extends State<Welcomescreen> {
       final pts = poly.points;
 
       for (int i = 0; i < pts.length - 1; i++) {
+        // Yield occasionally to prevent UI freeze if polylines are massive
+        if (i % 500 == 0) await Future.delayed(Duration.zero);
+
         // 🚫 THIS WAS MISSING
         if (preventEndpointSnap &&
             _isNearEndpoint(tap, pts[i], pts[i + 1], 10)) {
@@ -4387,7 +4400,7 @@ class WelcomescreenState extends State<Welcomescreen> {
 
         final snap = _closestPointOnSegment(tap, pts[i], pts[i + 1]);
 
-        final d = Geolocator.distanceBetween(
+        final d = _haversineDistance(
           tap.latitude,
           tap.longitude,
           snap.latitude,
@@ -4405,13 +4418,13 @@ class WelcomescreenState extends State<Welcomescreen> {
   }
 
   bool _isNearEndpoint(LatLng p, LatLng a, LatLng b, double meters) {
-    final da = Geolocator.distanceBetween(
+    final da = _haversineDistance(
       p.latitude,
       p.longitude,
       a.latitude,
       a.longitude,
     );
-    final db = Geolocator.distanceBetween(
+    final db = _haversineDistance(
       p.latitude,
       p.longitude,
       b.latitude,
@@ -4490,7 +4503,10 @@ class WelcomescreenState extends State<Welcomescreen> {
 
     if (result == null) return;
 
-
+    if (result['action'] == 'success' || result['success'] == true) {
+      await _fetchPolylineDataFromBounds(force: true, preventZoom: true);
+      return;
+    }
 
     if (result['action'] == 'mark_transforme') {
       _startTransformerMarking(
@@ -4512,6 +4528,10 @@ class WelcomescreenState extends State<Welcomescreen> {
     setState(() { _isMarkingToilets = false; _toiletPoints.clear(); });
     final result = await Navigator.push<Map<String, dynamic>>(context, MaterialPageRoute(builder: (context) => RoadUpdateScreen(roadData: roadData, latitude: _currentLat, longitude: _currentLng, roadAgeCategory: widget.roadAgeCategory, zoneName: widget.zoneName, wardNo: widget.wardNo, wardName: widget.wardName, ownershipList: ownershipList, initialFormData: formData)));
     if (result == null) return;
+    if (result['action'] == 'success' || result['success'] == true) {
+      await _fetchPolylineDataFromBounds(force: true, preventZoom: true);
+      return;
+    }
     if (result['action'] == 'mark_toilet') _startToiletMarking(Map<String, dynamic>.from(result['roadData']), Map<String, dynamic>.from(result['formData']), List<Map<String, dynamic>>.from(result['toiletPoints'] ?? []));
   }
 
@@ -4527,6 +4547,10 @@ class WelcomescreenState extends State<Welcomescreen> {
     setState(() { _isMarkingTransformers = false; _transformerPoints.clear(); });
     final result = await Navigator.push<Map<String, dynamic>>(context, MaterialPageRoute(builder: (context) => RoadUpdateScreen(roadData: roadData, latitude: _currentLat, longitude: _currentLng, roadAgeCategory: widget.roadAgeCategory, zoneName: widget.zoneName, wardNo: widget.wardNo, wardName: widget.wardName, ownershipList: ownershipList, initialFormData: formData)));
     if (result == null) return;
+    if (result['action'] == 'success' || result['success'] == true) {
+      await _fetchPolylineDataFromBounds(force: true, preventZoom: true);
+      return;
+    }
     if (result['action'] == 'mark_transforme') _startTransformerMarking(Map<String, dynamic>.from(result['roadData']), Map<String, dynamic>.from(result['formData']), List<Map<String, dynamic>>.from(result['transformerPoints'] ?? []));
   }
 
@@ -5624,10 +5648,13 @@ class WelcomescreenState extends State<Welcomescreen> {
     debugPrint("🗺️ Final persistent green median polygons count: ${_greenMedianPolygons.length}");
   }
 
-  void _processTrafficSafety(List<Map<String, dynamic>> data, BitmapDescriptor icon) {
+  Future<void> _processTrafficSafety(List<Map<String, dynamic>> data, BitmapDescriptor icon) async {
     final markers = <Marker>{};
     final lines = <Polyline>{};
-    for (final item in data) {
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i];
+      if (i % 20 == 0) await Future.delayed(Duration.zero);
+
       final type = item['geometryType'] ?? item['type'] ?? (item.containsKey('latitude') ? 'Point' : 'Line');
       if (type == "Point") {
         final lat = double.tryParse(item['latitude']?.toString() ?? item['lat']?.toString() ?? '');
@@ -5637,7 +5664,7 @@ class WelcomescreenState extends State<Welcomescreen> {
             markerId: MarkerId("ts_${item['id'] ?? item['gid'] ?? item['road_id']}"),
             position: LatLng(lat, lng),
             icon: icon,
-            infoWindow: InfoWindow(title: "Traffic Safety Point"),
+            infoWindow: const InfoWindow(title: "Traffic Safety Point"),
           ));
         }
       } else if (type == "Line" || type == "LineString") {
@@ -5689,10 +5716,13 @@ class WelcomescreenState extends State<Welcomescreen> {
     _trafficSafetyLines = lines;
   }
 
-  void _processPavementDistress(List<Map<String, dynamic>> data, BitmapDescriptor icon) {
+  Future<void> _processPavementDistress(List<Map<String, dynamic>> data, BitmapDescriptor icon) async {
     final markers = <Marker>{};
     final polygons = <Polygon>{};
-    for (final item in data) {
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i];
+      if (i % 20 == 0) await Future.delayed(Duration.zero);
+
       final type = item['geometryType'] ?? item['type'] ?? (item.containsKey('latitude') ? 'Point' : 'Polygon');
       if (type == "Point") {
         final lat = double.tryParse(item['latitude']?.toString() ?? item['lat']?.toString() ?? '');
@@ -5702,7 +5732,7 @@ class WelcomescreenState extends State<Welcomescreen> {
             markerId: MarkerId("pd_${item['id'] ?? item['gid'] ?? item['road_id']}"),
             position: LatLng(lat, lng),
             icon: icon,
-            infoWindow: InfoWindow(title: "Pavement Distress Point"),
+            infoWindow: const InfoWindow(title: "Pavement Distress Point"),
           ));
         }
       } else if (type == "Polygon" || type == "MultiPolygon") {
@@ -5893,8 +5923,46 @@ List<List<List<LatLng>>> parseWKTBatch(List<String> wktList) {
 List<List<LatLng>> parseWKTToSegments(String wkt) {
   wkt = wkt.trim();
 
-  if (wkt.startsWith('LINESTRING')) {
-    String body = wkt.replaceFirst('LINESTRING', '').trim();
+  // Try parsing GeoJSON first
+  if (wkt.startsWith('{') || wkt.startsWith('[')) {
+    try {
+      final decoded = jsonDecode(wkt);
+      final List<List<LatLng>> segments = [];
+      if (decoded is Map) {
+         final type = decoded['type']?.toString().toLowerCase();
+         final coords = decoded['coordinates'];
+         if (coords is List) {
+           if (type == 'linestring') {
+             List<LatLng> pts = [];
+             for (var c in coords) {
+               if (c is List && c.length >= 2) {
+                 pts.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+               }
+             }
+             if (pts.length > 1) segments.add(pts);
+           } else if (type == 'multilinestring') {
+             for (var line in coords) {
+               if (line is List) {
+                 List<LatLng> pts = [];
+                 for (var c in line) {
+                   if (c is List && c.length >= 2) {
+                     pts.add(LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()));
+                   }
+                 }
+                 if (pts.length > 1) segments.add(pts);
+               }
+             }
+           }
+         }
+      }
+      if (segments.isNotEmpty) return segments;
+    } catch (_) {}
+  }
+
+  final upper = wkt.toUpperCase();
+
+  if (upper.startsWith('LINESTRING')) {
+    String body = upper.replaceFirst('LINESTRING', '').trim();
     body = body.substring(1, body.length - 1);
 
     final pts = body.split(',').map((p) {
@@ -5905,8 +5973,8 @@ List<List<LatLng>> parseWKTToSegments(String wkt) {
     return pts.length > 1 ? [pts] : [];
   }
 
-  if (wkt.startsWith('MULTILINESTRING')) {
-    String body = wkt.replaceFirst('MULTILINESTRING', '').trim();
+  if (upper.startsWith('MULTILINESTRING')) {
+    String body = upper.replaceFirst('MULTILINESTRING', '').trim();
     body = body.substring(1, body.length - 1);
 
     final lineStrings = body.split('),(');

@@ -246,7 +246,7 @@ class DrainageService {
         throw Exception("Failed to load new created drains: ${response.statusCode}");
       }
 
-      return jsonDecode(response.body);
+      return await compute(jsonDecode, response.body);
     } catch (e) {
       debugPrint("❌ Request error in fetchNewCreatedDrains: $e");
       rethrow;

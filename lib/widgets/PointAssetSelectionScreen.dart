@@ -33,7 +33,7 @@ class PointAssetSelectionScreen extends StatelessWidget {
               title: Text(asset["title"] as String),
               trailing: const Icon(Icons.arrow_forward_ios),
               onTap: () {
-                Navigator.push(
+                Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(
                     builder: (_) => RoadConditionScreen(

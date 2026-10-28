@@ -534,9 +534,6 @@ class _NewRoadFormScreenState extends State<NewRoadFormScreen> {
 
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 70,
-        maxWidth: 1600,
-        maxHeight: 1200,
       );
 
       if (image == null) return;
@@ -686,9 +683,6 @@ class _NewRoadFormScreenState extends State<NewRoadFormScreen> {
 
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 70,
-        maxWidth: 1600,
-        maxHeight: 1200,
       );
 
       if (image == null) return;
@@ -782,9 +776,6 @@ class _NewRoadFormScreenState extends State<NewRoadFormScreen> {
 
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 70,
-        maxWidth: 1600,
-        maxHeight: 1200,
       );
 
       if (image == null) return;

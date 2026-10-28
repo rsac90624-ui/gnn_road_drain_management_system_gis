@@ -590,9 +590,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
 
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 75,
-        maxWidth: 1600,
-        maxHeight: 1600,
       );
 
       if (image == null) {
@@ -637,9 +634,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       await prefs.setString('last_picker_type', 'median');
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 75,
-        maxWidth: 1600,
-        maxHeight: 1600,
       );
 
       if (image == null) {
@@ -685,9 +679,6 @@ class _RoadUpdateScreenState extends State<RoadUpdateScreen> {
       await prefs.setString('last_picker_type', 'footpath');
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 75,
-        maxWidth: 1600,
-        maxHeight: 1600,
       );
       if (image == null) {
         await prefs.remove('last_picker_type');

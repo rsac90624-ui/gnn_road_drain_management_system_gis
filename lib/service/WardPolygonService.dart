@@ -1,5 +1,5 @@
 import 'dart:convert';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -55,7 +55,7 @@ class WardPolygonService {
       );
     }
 
-    final decoded = jsonDecode(response.body);
+    final decoded = await compute(jsonDecode, response.body);
 
     if (decoded is! List) {
       throw Exception(

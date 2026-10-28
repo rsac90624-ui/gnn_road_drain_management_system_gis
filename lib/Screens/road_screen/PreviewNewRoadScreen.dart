@@ -351,12 +351,13 @@ class _PreviewNewRoadScreenState extends State<PreviewNewRoadScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
+                    final nav = Navigator.of(context);
                     // Close the success dialog
-                    Navigator.pop(context);
+                    nav.pop();
                     // Close the preview screen
-                    Navigator.pop(context);
+                    nav.pop();
                     // Close the form screen and return true back to map
-                    Navigator.pop(context, true);
+                    nav.pop(true);
                   },
                   child: const Text(
                     "OK",

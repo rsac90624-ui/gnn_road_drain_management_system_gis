@@ -1,6 +1,7 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'DrainageMapScreen.dart';
 import 'SystemSelectionScreen.dart';
@@ -320,7 +321,7 @@ class _RoadConditionScreenState extends State<RoadConditionScreen> {
         },
       );      if (!mounted) return;
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+        final List<dynamic> data = await compute(jsonDecode, response.body) as List;
         setState(() {
           wards = data.map<Map<String, dynamic>>((e) {
             return {
@@ -372,7 +373,7 @@ class _RoadConditionScreenState extends State<RoadConditionScreen> {
         },
       );      if (!mounted) return;
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+        final List<dynamic> data = await compute(jsonDecode, response.body) as List;
         setState(() {
           wards = data.map<Map<String, dynamic>>((e) {
             return {
@@ -534,7 +535,7 @@ class _RoadConditionScreenState extends State<RoadConditionScreen> {
                                 selectedRoadConditions.isNotEmpty))
                         ? () {
                             if (widget.system == AssetSystem.road) {
-                              Navigator.push(
+                              Navigator.pushReplacement(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => Welcomescreen(
@@ -547,7 +548,7 @@ class _RoadConditionScreenState extends State<RoadConditionScreen> {
                                 ),
                               );
                             } else {
-                              Navigator.push(
+                              Navigator.pushReplacement(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => DrainageMapScreen(
@@ -555,7 +556,6 @@ class _RoadConditionScreenState extends State<RoadConditionScreen> {
                                     wardNo: selectedWardNo,
                                     wardName: selectedWardName,
                                     username: username, // ✅ ADD THIS
-
                                   ),
                                 ),
                               );
